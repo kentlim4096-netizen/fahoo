@@ -7,3 +7,5 @@ gspread==6.1.4
 google-auth==2.35.0
 # QR decoding for tools/import_totp_qr.py — not imported by the service itself.
 opencv-python-headless==4.10.0.84
+# Screen capture for the setup wizard QR scanner (only used by the installed tool)
+pillow>=10

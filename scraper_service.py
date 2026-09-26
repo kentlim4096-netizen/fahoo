@@ -548,7 +548,7 @@ async def ensure_api_token(force=False):
             # The dedicated KR883 window is open but logged out - sign it in automatically
             # (credentials + TOTP from .env). Safe: it's the dedicated profile, not the everyday
             # Chrome, so nobody gets kicked out.
-            if await browser_login_cdp():
+            if KW_ALLOW_AUTO_LOGIN and await browser_login_cdp():
                 acc = await read_browser_session_cdp()
                 if acc and (_jwt_exp(acc) - time.time()) > 30:
                     return acc
@@ -560,6 +560,9 @@ async def ensure_api_token(force=False):
         acc = (sess.get("localStorage") or {}).get("kw388_access", "")
         if acc and not force and (_jwt_exp(acc) - time.time()) > 120:
             return acc
+        if not KW_ALLOW_AUTO_LOGIN:
+            raise RuntimeError("No valid KR883 session, and automatic login/refresh is disabled "
+                               "(KW388_ALLOW_AUTO_LOGIN=false). Log in to KR883 in your normal Chrome.")
         a = await api_refresh_token()
         if a:
             return a
@@ -626,6 +629,12 @@ def _envflag(name, default=False):
 # ON whenever no backend admin username is configured, so an unconfigured install is local by
 # default rather than failing halfway through a run against a backend that isn't there.
 LOCAL_ONLY = _envflag("LOCAL_ONLY", default=not BACKEND_USER)
+
+# Automatic KR883 password/TOTP login (and token refresh) is disabled unless explicitly enabled. The
+# UI workflow never uses it: it mirrors the session of the normal Chrome. A second login would
+# supersede that session and log the worker out. Set KW388_ALLOW_AUTO_LOGIN=true only for a
+# dedicated scraper-only KR883 account.
+KW_ALLOW_AUTO_LOGIN = _envflag("KW388_ALLOW_AUTO_LOGIN", default=False)
 
 # When true, the scraper NEVER logs in itself: it only uses the copied session. KR883 allows one
 # session per account, so a self-login invalidates the human's browser session ("session
@@ -1592,19 +1601,20 @@ async def ui_startup_session_check():
     session be synchronized from the normal Chrome? (3) validate. Then release the profile - the
     browser is (re)opened, once, when a queue starts. Never logs in."""
     prov = get_ui_provider()
-    try:
-        await prov.start()
-        UI_RUN["session"] = {"state": "valid" if not prov.metrics.session_syncs else "synced-from-chrome", "at": now_iso()}
-    except ReauthRequired:
-        UI_RUN["session"] = {"state": "none-available", "at": now_iso(),
-                             "detail": "dedicated profile not authenticated and no valid session in the normal Chrome"}
-    except Exception as e:
-        UI_RUN["session"] = {"state": "check-failed", "at": now_iso(), "detail": str(e)[:120]}
-    finally:
+    async with _UI_START_LOCK:           # same lock searches take before starting the browser: no race with an early lookup
         try:
-            await prov.close()
-        except Exception:
-            pass
+            await prov.start()
+            UI_RUN["session"] = {"state": "valid" if not prov.metrics.session_syncs else "synced-from-chrome", "at": now_iso()}
+        except ReauthRequired:
+            UI_RUN["session"] = {"state": "none-available", "at": now_iso(),
+                                 "detail": "dedicated profile not authenticated and no valid session in the normal Chrome"}
+        except Exception as e:
+            UI_RUN["session"] = {"state": "check-failed", "at": now_iso(), "detail": str(e)[:120]}
+        finally:
+            try:
+                await prov.close()
+            except Exception:
+                pass
     print("ui session check: %s" % UI_RUN["session"].get("state"), file=sys.stderr)
 
 
@@ -1766,6 +1776,7 @@ async def handle_ui_status(request):
         "creditReportMode": CREDIT_REPORT_MODE, "headless": UI_HEADLESS, "profile": UI_PROFILE_DIR,
         "paused": UI_RUN["paused"], "reason": UI_RUN["reason"],
         "session": UI_RUN["session"], "syncedCopies": SESSION_SYNC.syncs if SESSION_SYNC else 0,
+        "account": prov.account if prov else None,
         "browserAlive": bool(prov and prov.alive), "browserLaunches": prov.launches if prov else 0,
         "metrics": prov.metrics.as_dict() if prov else None,
     })
@@ -3143,7 +3154,7 @@ WORKER_PATHS = ("/report", "/credit-report")
 # is exactly the "stuck on 403" problem. The cookie is signed so it can't be forged, and lives
 # long (30 days) so there's no auto-logout.
 def _auth_secret():
-    p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", ".auth_secret")
+    p = os.path.join(_data, ".auth_secret")
     try:
         if os.path.exists(p):
             return open(p, "rb").read()
@@ -3353,7 +3364,7 @@ async def ngrok_watchdog():
                 try:
                     subprocess.Popen(
                         [exe, "http", str(PORT), "--url=" + NGROK_DOMAIN_CFG,
-                         "--log", os.path.join(here, "data", "ngrok.log")],
+                         "--log", os.path.join(_data, "ngrok.log")],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)
                         | getattr(subprocess, "DETACHED_PROCESS", 0))
@@ -3723,15 +3734,21 @@ def _already_running():
         return s.connect_ex(("127.0.0.1", PORT)) == 0
 
 
-if __name__ == "__main__":
+def main():
     if _already_running():
         print(f"credit report tool already running on port {PORT} - nothing to do.", file=sys.stderr)
-        sys.exit(0)
-    print(f"[{now_iso()}] credit report tool service listening on 0.0.0.0:{PORT}", file=sys.stderr)
+        return 1
+    bind = os.environ.get("KW388_BIND", "0.0.0.0")      # 127.0.0.1 = this computer only
+    print(f"[{now_iso()}] credit report tool service listening on {bind}:{PORT}", file=sys.stderr)
     if LOCAL_ONLY:
         print(f"  mode: LOCAL_ONLY — results written to {OUTPUT_DIR}, nothing posted to a backend",
               file=sys.stderr)
     else:
         print(f"  mode: backend — posting results to {API_BASE}", file=sys.stderr)
     print(f"  candidates: {CANDIDATES_PATH} ({len(candidate_files())} file(s) found)", file=sys.stderr)
-    web.run_app(make_app(), host="0.0.0.0", port=PORT, print=None)
+    web.run_app(make_app(), host=bind, port=PORT, print=None)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

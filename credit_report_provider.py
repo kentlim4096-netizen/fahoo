@@ -113,10 +113,16 @@ class UiCreditReportProvider(CreditReportProvider):
         self.launches = 0                      # how many browser launches happened (should stay 1 per queue)
         self.browser_pid = None
         self._last_ic = None
+        self.account = None                    # who is logged in (username / position / the two permissions we need)
         self._lock = asyncio.Lock()            # one lookup at a time on the single page
+        self._start_lock = asyncio.Lock()      # start() is never run twice at once
 
     # ------------------------------------------------------------ lifecycle
     async def start(self):
+        async with self._start_lock:
+            await self._start_unlocked()
+
+    async def _start_unlocked(self):
         if self.ctx:
             return
         from playwright.async_api import async_playwright
@@ -138,6 +144,30 @@ class UiCreditReportProvider(CreditReportProvider):
         self.ctx.on("request", self._count_auth_requests)
         self.log(f"[ui] browser launched (headless={self.headless}) profile={self.profile}")
         await self._open_member_list_or_sync()
+        await self._read_account()
+
+    async def _read_account(self):
+        """Which KR883 account is this session? Reads the app's own profile blob (username, position,
+        permission NAMES) - never the tokens. Each KR883 ID has its own permissions; the workflow needs
+        view_member_list and view_credit_report."""
+        try:
+            prof = await self.page.evaluate("() => { try { return JSON.parse(localStorage.getItem('kw388_profile') || 'null'); } catch (e) { return null; } }")
+        except Exception:
+            prof = None
+        if not prof:
+            self.account = None
+            return
+        u, perms = prof.get("user") or {}, prof.get("permissions") or []
+        sup = bool((prof.get("adminProfile") or {}).get("is_super_admin")) or bool(u.get("is_superuser"))
+        self.account = {"username": u.get("username", ""), "position": (prof.get("position") or {}).get("name", ""),
+                        "superAdmin": sup, "canMemberList": sup or "view_member_list" in perms,
+                        "canCreditReport": sup or "view_credit_report" in perms}
+        a = self.account
+        self.log(f"[ui] KR883 account {a['username']} ({a['position'] or 'no position'}): Member List permission="
+                 f"{'yes' if a['canMemberList'] else 'NO'}, Credit Report permission={'yes' if a['canCreditReport'] else 'NO'}")
+
+    def _who(self):
+        return (self.account or {}).get("username") or "this account"
 
     def _count_auth_requests(self, req):
         if re.search(r"/users/admin/(login|2fa)/", req.url):
@@ -160,6 +190,7 @@ class UiCreditReportProvider(CreditReportProvider):
         self.log(f"[ui] session synchronized from {where}")
         try:
             await self._open_member_list()
+            await self._read_account()
             return True
         except ReauthRequired:
             return False
@@ -173,14 +204,16 @@ class UiCreditReportProvider(CreditReportProvider):
                                      "synchronized from the normal Chrome (it is logged out or closed).")
 
     async def close(self):
-        ctx, pw = self.ctx, self._pw
-        self.ctx = self.page = self._pw = None
-        try:
-            if ctx:
-                await ctx.close()
-        finally:
-            if pw:
-                await pw.stop()
+        """Close the browser. Waits for a lookup in progress (never pulls the page out from under one)."""
+        async with self._lock:
+            ctx, pw = self.ctx, self._pw
+            self.ctx = self.page = self._pw = None
+            try:
+                if ctx:
+                    await ctx.close()
+            finally:
+                if pw:
+                    await pw.stop()
 
     @property
     def alive(self):
@@ -201,6 +234,10 @@ class UiCreditReportProvider(CreditReportProvider):
             self._guard()
             await p.wait_for_timeout(1500)
             self._guard()
+            path = "/" + (p.url or "").split("://", 1)[-1].split("/", 1)[-1].split("?")[0]
+            if not path.startswith("/members"):
+                raise RuntimeError(f"KR883 would not open Member List for {self._who()} (it went to {path}) - "
+                                   f"this account may lack the view_member_list permission")
             raise
         self._guard()
         self._last_ic = None
@@ -384,7 +421,12 @@ class UiCreditReportProvider(CreditReportProvider):
         tp = time.perf_counter()
         await row.locator("button.row-action").click()
         item = p.locator(".q-menu .act-menu button.act-item", has_text="Credit report").first
-        await item.wait_for(timeout=8000)
+        try:
+            await item.wait_for(timeout=8000)
+        except Exception:
+            labels = [t.strip() for t in await p.locator(".q-menu .act-item").all_inner_texts()]
+            raise RuntimeError(f"'Credit report' is not in the Actions menu for {self._who()} (menu shows: {labels}) - "
+                               f"this account may lack the view_credit_report permission")
         tr.ok("actions_clicked", "row Actions (3-dot) clicked, menu shows 'Credit report'")
 
         # 3. Credit report -> the request the PAGE makes -> popup

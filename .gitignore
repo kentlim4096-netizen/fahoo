@@ -28,3 +28,8 @@ google-credentials*.json
 # Logs, browser profiles, recordings and saved data all live under data/ (already ignored above).
 *.log
 *.log.*
+
+# ---- Build output (regenerate with build_exe.ps1) ----
+build/
+dist/
+*.spec
