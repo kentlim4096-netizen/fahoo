@@ -1,0 +1,843 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Credit Report Tool</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --border: #e2e5ea; --text: #16181d; --muted: #6b7280;
+    --accent: #2563eb; --accent-fg: #ffffff; --ok: #157f4b; --ok-bg: #e7f6ee;
+    --warn: #8a5a00; --warn-bg: #fdf3dd; --err: #b42318; --err-bg: #fdeceb;
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --panel: #1c1f25; --border: #2c313a; --text: #e8eaed; --muted: #9aa3af;
+      --accent: #4f8cff; --accent-fg: #0b1020; --ok: #6ee7a8; --ok-bg: #10291d;
+      --warn: #f0c674; --warn-bg: #2e2413; --err: #ff9a92; --err-bg: #331714;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 28px 20px 60px; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
+  h1 { font-size: 21px; margin: 0; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 24px; }
+  .pill {
+    font-size: 12px; padding: 3px 9px; border-radius: 999px; font-weight: 600;
+    background: var(--ok-bg); color: var(--ok); white-space: nowrap;
+  }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .pill.err  { background: var(--err-bg);  color: var(--err); }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 18px 20px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .card .hint { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  #drop {
+    border: 1.5px dashed var(--border); border-radius: var(--radius); padding: 28px 16px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  #drop:hover, #drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+  #drop strong { color: var(--accent); }
+  #drop .small { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+  button {
+    background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 8px;
+    padding: 9px 16px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: inherit;
+  }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  select, input[type=text], input[type=number] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 10px; font-size: 14px; font-family: inherit;
+  }
+  label.chk { display: inline-flex; align-items: center; gap: 6px; font-size: 13.5px; color: var(--muted); cursor: pointer; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .msg { margin-top: 12px; padding: 10px 12px; border-radius: 8px; font-size: 13.5px; display: none; white-space: pre-wrap; }
+  .msg.show { display: block; }
+  .msg.ok   { background: var(--ok-bg);   color: var(--ok); }
+  .msg.warn { background: var(--warn-bg); color: var(--warn); }
+  .msg.err  { background: var(--err-bg);  color: var(--err); }
+  .stats { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 14px; }
+  .stat .n { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .bar { height: 6px; background: var(--border); border-radius: 999px; overflow: hidden; margin-top: 6px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .progline {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+    margin-top: 14px; font-size: 13px; font-variant-numeric: tabular-nums;
+  }
+  .linkbtn { background: none; border: 0; color: var(--err); cursor: pointer; font-size: 12.5px; padding: 2px 4px; font-family: inherit; }
+  code { background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; font-size: 12.5px; }
+  a { color: var(--accent); }
+  /* ---- credit report ---- */
+  .rp-flag { background: var(--err-bg); color: var(--err); border: 1px solid color-mix(in srgb, var(--err) 30%, transparent);
+    border-radius: 10px; padding: 11px 14px; margin: 4px 0 16px; font-size: 14px; font-weight: 600; }
+  .rp-name { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; margin: 2px 0 14px; }
+  .rp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .rp-card { border: 1px solid var(--border); border-radius: 10px; padding: 13px 15px; background: var(--bg); }
+  .rp-card.bad { border-color: color-mix(in srgb, var(--err) 45%, transparent); background: var(--err-bg); }
+  .rp-card .v { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .rp-card.bad .v { color: var(--err); }
+  .rp-card .l { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 3px; }
+  .rp-meta { display: flex; flex-wrap: wrap; gap: 8px 26px; font-size: 13px; color: var(--muted); margin-bottom: 18px; }
+  .rp-meta b { color: var(--text); font-weight: 600; }
+  .rp-sec { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 14px; overflow: hidden; }
+  .rp-sec > h4 { margin: 0; padding: 11px 15px; font-size: 13.5px; background: var(--bg);
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+  .rp-sec > h4 .cnt { background: var(--border); color: var(--muted); border-radius: 999px; padding: 1px 9px; font-size: 12px; font-weight: 600; }
+  .rp-scroll { max-height: 340px; overflow: auto; }
+  .rp-sec table { font-size: 13px; }
+  .rp-sec th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .rp-sec td, .rp-sec th { padding: 7px 12px; white-space: nowrap; }
+  .pill-s { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .pill-green { background: var(--ok-bg); color: var(--ok); }
+  .pill-red { background: var(--err-bg); color: var(--err); }
+  .pill-amber { background: var(--warn-bg); color: var(--warn); }
+  .pill-grey { background: var(--border); color: var(--muted); }
+  .rp-more { padding: 9px 15px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1>Credit Report Tool</h1>
+    <a href="/logout" style="margin-left:auto;font-size:13px">Sign out</a>
+    <span class="pill" id="mode">checking…</span>
+    <span class="pill warn" id="creds" style="display:none">KW388 credentials missing</span>
+  </header>
+  <div class="sub">Local control panel — <code>127.0.0.1:8765</code></div>
+
+  <div class="card">
+    <h2>1 · Upload customer list</h2>
+    <p class="hint">Excel <code>.xlsx</code> files. Sheet tabs must be named as plain numbers
+      (e.g. <code>307</code>, <code>78</code>) — those are read as dated snapshots, newest first.
+      Column A = name, B = IC, C = phone, E = loan amount.</p>
+
+    <div id="drop">
+      <div><strong>Choose files</strong> or drag them here</div>
+      <div class="small">.xlsx — multiple files allowed</div>
+    </div>
+    <input type="file" id="file" accept=".xlsx,.xlsm" multiple hidden>
+
+    <div class="row">
+      <label class="chk"><input type="checkbox" id="replace">
+        Use only the new upload <span style="opacity:.75">(switches older lists off — nothing is deleted)</span></label>
+    </div>
+    <div class="msg" id="upMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>2 · Saved lists</h2>
+    <p class="hint">Every list you've uploaded is kept here — you never need to re-upload an old
+      one. Untick a list to leave it out of the next scrape without deleting it.</p>
+    <table id="filesTable"><tbody></tbody></table>
+    <div class="stats" id="previewStats"></div>
+    <div class="row"><button class="ghost" id="refresh">Refresh</button></div>
+    <div class="msg" id="listMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>3 · Scrape KW388</h2>
+    <p class="hint">Logs into KW388 and pulls each candidate's loan history.</p>
+    <div class="row">
+      <select id="mode-sel">
+        <option value="all">All candidates</option>
+        <option value="new">New only</option>
+        <option value="old">Already-known only</option>
+      </select>
+      <input type="number" id="limit" placeholder="limit (optional)" min="1" style="width:150px">
+      <label class="chk"><input type="checkbox" id="fast"> Fast mode</label>
+      <label class="chk"><input type="checkbox" id="fresh" checked>
+        Fresh <span style="opacity:.75">(re-scrape everyone, ignore today's cache)</span></label>
+      <button id="scrape">Run scrape</button>
+      <button id="scrapeFiltered" title="Scrape, then download only today's borrowers minus the delinquent/weak ones">Filtered scrape</button>
+    </div>
+    <div id="progWrap" style="display:none">
+      <div class="progline">
+        <span id="progText">—</span>
+        <span id="progEta" style="color:var(--muted)"></span>
+      </div>
+      <div class="bar"><i id="bar"></i></div>
+    </div>
+    <div class="msg" id="scrapeMsg"></div>
+    <div id="uiPause" style="display:none;margin:10px 0">
+      <b>MANUAL_REAUTH_REQUIRED</b> — the dedicated KR883 profile needs a manual login (nothing is typed for you).
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+        <button id="uiReauth" type="button">Open login window</button>
+        <button id="uiResume" type="button" class="ghost">Resume</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" hidden>
+    <h2>4 · Credit Report — check one IC</h2>
+    <p class="hint">Look up a single customer's full credit history, right now. ~1 second.</p>
+    <div class="row">
+      <input type="text" id="icInput" placeholder="e.g. 960924085285 or 960924-08-5285"
+             style="width:280px; font-variant-numeric:tabular-nums">
+      <button id="icBtn">Search</button>
+    </div>
+    <div class="msg" id="icMsg"></div>
+    <div id="report" hidden></div>
+  </div>
+
+  <div class="card">
+    <h2>4 · Scraped data</h2>
+    <p class="hint">Results from finished scrapes. Pick what you want, then download it as Excel.</p>
+
+    <div class="row" id="dlBar">
+      <select id="dlFile"></select>
+      <select id="dlFilter">
+        <option value="filtered">Loan today — good candidates (filtered)</option>
+        <option value="today">Took a loan today</option>
+        <option value="all">Everyone scraped</option>
+        <option value="overdue">Overdue only</option>
+        <option value="today_not_overdue">Loan today &amp; not overdue</option>
+        <option value="clean">No overdue</option>
+      </select>
+      <select id="dlRemark"><option value="">Any remark</option></select>
+      <select id="dlSort">
+        <option value="">Sort: Today (default)</option>
+        <option value="todayCount">Loans today</option>
+        <option value="overdueDays">Overdue days</option>
+        <option value="totalCompleted">Completed</option>
+        <option value="totalDisbursed">Disbursed</option>
+        <option value="openLoans">Open loans</option>
+        <option value="fullName">Name (A-Z)</option>
+      </select>
+      <button id="dlBtn">Download Excel</button>
+      <button class="ghost" id="dlJson">JSON</button>
+    </div>
+    <div class="msg" id="dlMsg"></div>
+
+    <table id="resTable"><tbody></tbody></table>
+    <div class="msg" id="resMsg"></div>
+    <div id="previewWrap" style="display:none; margin-top:16px">
+      <div class="progline"><strong id="previewTitle"></strong>
+        <button class="linkbtn" id="closePreview" style="color:var(--muted)">close</button></div>
+      <div class="row" style="margin-top:4px">
+        <select id="remarkFilter"><option value="">All remarks</option></select>
+        <input type="text" id="rowSearch" placeholder="search name or IC" style="width:200px">
+        <span style="color:var(--muted); font-size:12.5px">click a column heading to sort</span>
+      </div>
+      <div style="overflow-x:auto; max-height:460px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; margin-top:10px">
+        <table id="previewTable"><tbody></tbody></table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>5 · Send to Google Sheets</h2>
+    <p class="hint">Writes into the spreadsheet set by <code>GOOGLE_SHEETS_SPREADSHEET_ID</code>.
+      The target worksheet is cleared and rewritten each time.</p>
+    <div id="sheetsSetup" style="margin-bottom:14px"></div>
+    <div class="row">
+      <select id="src">
+        <option value="results">Scrape results (latest)</option>
+        <option value="candidates">Uploaded customer list</option>
+      </select>
+      <input type="text" id="ws" placeholder="worksheet name (optional)" style="width:220px">
+      <button id="export">Export</button>
+    </div>
+    <div class="msg" id="expMsg"></div>
+  </div>
+
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const show = (el, cls, text) => { el.className = "msg show " + cls; el.textContent = text; };
+const hide = el => { el.className = "msg"; };
+
+async function api(url, opts) {
+  let r;
+  try {
+    r = await fetch(url, opts);
+  } catch (e) {
+    // Service unreachable (down / restarting). It self-heals within a minute; tell the user.
+    throw new Error("Can't reach the scraper service — it may be starting up. Wait ~1 minute and try again.");
+  }
+  // Session dropped -> bounce to the login form instead of failing silently.
+  if (r.status === 401) {
+    location.href = "/login?next=" + encodeURIComponent(location.pathname);
+    throw new Error("Session expired — redirecting to login…");
+  }
+  if (r.status === 403) throw new Error("This action needs the admin login. Sign out and log in as admin.");
+  let body = null;
+  try { body = await r.json(); } catch (e) { body = { error: "Bad response from server (" + r.status + ")" }; }
+  if (!r.ok) throw new Error(body.error || ("Request failed (" + r.status + ")"));
+  return body;
+}
+
+// ---- health ----
+async function loadHealth() {
+  try {
+    const h = await api("/health");
+    $("#mode").textContent = h.localOnly ? "local only — no backend" : "backend: " + h.apiBase;
+    $("#mode").className = "pill" + (h.localOnly ? "" : " warn");
+    $("#creds").style.display = h.credentials.kw388 ? "none" : "";
+    renderSheetsSetup(h.sheets || {});
+  } catch (e) {
+    $("#mode").textContent = "service unreachable";
+    $("#mode").className = "pill err";
+  }
+}
+
+function renderSheetsSetup(s) {
+  const el = $("#sheetsSetup");
+  if (s.configured) {
+    el.innerHTML =
+      "<div class='msg show ok' style='margin-top:0'>Connected." +
+      (s.autoExport
+        ? " <strong>Auto-export is ON</strong> — every finished scrape uploads itself to tab <code>" + esc(s.nextTabName) + "</code>."
+        : " Auto-export is off; set <code>GOOGLE_SHEETS_AUTO_EXPORT=true</code> in .env to upload automatically after each scrape.") +
+      "</div>";
+    return;
+  }
+  const step = (done, html) =>
+    "<li style='margin:5px 0" + (done ? "; opacity:.55" : "") + "'>" + (done ? "&#10003; " : "") + html + "</li>";
+  el.innerHTML =
+    "<div class='msg show warn' style='margin-top:0'><strong>Not connected yet.</strong><ol style='margin:8px 0 0 18px; padding:0'>" +
+    step(false, "In <a href='https://console.cloud.google.com/' target='_blank' rel='noopener'>Google Cloud console</a>, create a project and enable the <strong>Google Sheets API</strong>.") +
+    step(s.hasCredentialsFile,
+      "Create a <strong>Service Account</strong>, then Keys &rarr; Add key &rarr; JSON. Save it as <code>" + esc(s.credentialsPath || "google-credentials.json") + "</code>.") +
+    step(!!s.serviceAccountEmail,
+      s.serviceAccountEmail
+        ? "Share your Google Sheet with <code>" + esc(s.serviceAccountEmail) + "</code> as <strong>Editor</strong>."
+        : "Share your Google Sheet with the key's <code>client_email</code> as <strong>Editor</strong>.") +
+    step(s.hasSpreadsheetId,
+      "Put the sheet ID in <code>.env</code> as <code>GOOGLE_SHEETS_SPREADSHEET_ID</code> — it's the long part of <code>/spreadsheets/d/&lt;ID&gt;/edit</code>.") +
+    step(s.autoExport, "Set <code>GOOGLE_SHEETS_AUTO_EXPORT=true</code> to upload automatically after every scrape.") +
+    "</ol><div style='margin-top:8px'>Restart the scraper after editing <code>.env</code>.</div></div>";
+}
+
+// ---- upload ----
+const drop = $("#drop"), fileInput = $("#file");
+drop.onclick = () => fileInput.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => {
+  e.preventDefault(); drop.classList.remove("over");
+  if (e.dataTransfer.files.length) upload(e.dataTransfer.files);
+};
+fileInput.onchange = () => { if (fileInput.files.length) upload(fileInput.files); };
+
+async function upload(files) {
+  const fd = new FormData();
+  for (const f of files) fd.append("files", f, f.name);
+  show($("#upMsg"), "ok", "Uploading " + files.length + " file(s)…");
+  try {
+    const r = await api("/candidates/upload?replace=" + ($("#replace").checked ? "true" : "false"),
+                        { method: "POST", body: fd });
+    let txt = "Uploaded " + r.saved.map(s => s.name).join(", ") + " — " + r.total + " candidates parsed.";
+    if (r.errors && r.errors.length) txt += "\nSkipped: " + r.errors.join("; ");
+    show($("#upMsg"), r.warning ? "warn" : "ok", r.warning ? txt + "\n" + r.warning : txt);
+    fileInput.value = "";
+    loadFiles();
+  } catch (e) {
+    show($("#upMsg"), "err", e.message);
+  }
+}
+
+// ---- current list ----
+async function loadFiles() {
+  const tb = $("#filesTable").querySelector("tbody");
+  try {
+    const r = await api("/candidates/files");
+    if (!r.files.length) {
+      tb.innerHTML = '<tr><td style="color:var(--muted)">' +
+        (r.legacyFile ? "One list file present (uploaded outside this page)." : "No list uploaded yet.") +
+        "</td></tr>";
+    } else {
+      tb.innerHTML = "<tr><th>Use</th><th>File</th><th>Uploaded</th><th>Tabs</th>" +
+        "<th class='num'>Candidates</th><th></th></tr>" +
+        r.files.map(f =>
+          "<tr" + (f.active ? "" : " style='opacity:.5'") + ">" +
+          "<td><input type='checkbox' data-tog=\"" + esc(f.name) + "\"" + (f.active ? " checked" : "") + "></td>" +
+          "<td>" + esc(f.name) + (f.exists ? "" : " <span class='pill err'>missing</span>") + "</td>" +
+          "<td style='color:var(--muted)'>" + esc(fmtDate(f.uploadedAt)) + "</td>" +
+          "<td style='color:var(--muted)'>" + esc((f.tabs || []).join(", ") || "—") + "</td>" +
+          "<td class='num'>" + (f.candidates == null ? "—" : f.candidates) + "</td>" +
+          "<td class='num'><button class='linkbtn' data-del=\"" + esc(f.name) + "\">delete</button></td></tr>"
+        ).join("");
+      tb.querySelectorAll("[data-del]").forEach(b => b.onclick = () => del(b.dataset.del));
+      tb.querySelectorAll("[data-tog]").forEach(b => b.onchange = () => toggle(b.dataset.tog, b.checked));
+    }
+  } catch (e) {
+    tb.innerHTML = '<tr><td style="color:var(--err)">' + esc(e.message) + "</td></tr>";
+  }
+  loadPreview();
+}
+
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function fmtDate(s) {
+  if (!s) return "—";
+  const d = new Date(s);
+  return isNaN(d) ? s : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
+
+async function del(name) {
+  if (!confirm("Permanently delete \"" + name + "\"?\n\nTo just leave it out of the next scrape, untick it instead."))
+    return loadFiles();
+  try { await api("/candidates/files/" + encodeURIComponent(name), { method: "DELETE" }); loadFiles(); }
+  catch (e) { show($("#listMsg"), "err", e.message); }
+}
+
+async function toggle(name, active) {
+  try {
+    await api("/candidates/files/" + encodeURIComponent(name) + "/toggle",
+              { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ active }) });
+    loadFiles();
+  } catch (e) { show($("#listMsg"), "err", e.message); loadFiles(); }
+}
+
+async function loadPreview() {
+  const el = $("#previewStats");
+  try {
+    const p = await api("/candidates/preview");
+    el.innerHTML = [["Total", p.total], ["New", p.new], ["Known", p.old]]
+      .map(([l, n]) => "<div class='stat'><div class='n'>" + n + "</div><div class='l'>" + l + "</div></div>").join("");
+    if (p.warning) show($("#listMsg"), "warn", p.warning); else hide($("#listMsg"));
+  } catch (e) {
+    el.innerHTML = "";
+    show($("#listMsg"), "warn", e.message);
+  }
+}
+
+// ---- scrape ----
+let filteredScrape = false;
+$("#scrape").onclick = async () => {
+  filteredScrape = false;
+  const body = { mode: $("#mode-sel").value, fast: $("#fast").checked, fresh: $("#fresh").checked };
+  const lim = parseInt($("#limit").value, 10);
+  if (lim > 0) body.limit = lim;
+  try {
+    await api("/scrape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    poll();
+  } catch (e) { show($("#scrapeMsg"), "err", e.message); }
+};
+// Filtered scrape: always all + fresh; on completion auto-downloads the filtered Excel
+// (today's borrowers, minus the delinquent/weak ones).
+$("#scrapeFiltered").onclick = async () => {
+  filteredScrape = true;
+  try {
+    await api("/scrape", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "all", fast: true, fresh: true }) });
+    show($("#scrapeMsg"), "ok", "Filtered scrape started — the filtered Excel downloads automatically when it finishes.");
+    poll();
+  } catch (e) { show($("#scrapeMsg"), "err", e.message); }
+};
+
+let polling = null, runStart = null, liveTick = 0;
+function fmtDur(sec) {
+  sec = Math.round(sec);
+  if (sec < 60) return sec + "s";
+  const m = Math.floor(sec / 60), h = Math.floor(m / 60);
+  return h ? h + "h " + (m % 60) + "m" : m + "m " + (sec % 60) + "s";
+}
+
+document.addEventListener("click", async e => {
+  if (e.target.id === "uiReauth") { await fetch("/scrape/reauth", { method: "POST" }); }
+  if (e.target.id === "uiResume") { await fetch("/scrape/resume", { method: "POST" }); }
+});
+
+async function poll() {
+  clearInterval(polling);
+  const tick = async () => {
+    let s;
+    try { s = await api("/status"); } catch (e) { return; }
+    const running = s.status === "running";
+    $("#scrape").disabled = running;
+    $("#progWrap").style.display = (running && s.progress) ? "" : "none";
+    if (running && s.startedAt) runStart = runStart || new Date(s.startedAt).getTime();
+    if (!running) runStart = null;
+
+    if (s.progress && s.progress.total) {
+      const { current, total } = s.progress;
+      const pct = 100 * current / total;
+      $("#bar").style.width = pct.toFixed(1) + "%";
+      $("#progText").textContent = current + " / " + total + " candidates (" + pct.toFixed(1) + "%)";
+      // Rate comes from elapsed wall-clock over completed candidates, so the estimate settles
+      // down as the run goes rather than swinging on each poll.
+      const elapsed = runStart ? (Date.now() - runStart) / 1000 : 0;
+      if (current > 0 && elapsed > 5) {
+        const rate = current / elapsed;
+        $("#progEta").textContent =
+          rate.toFixed(2) + "/s · " + fmtDur((total - current) / rate) + " left";
+      } else {
+        $("#progEta").textContent = "";
+      }
+    }
+    $("#uiPause").style.display = (running && s.stage === "MANUAL_REAUTH_REQUIRED") ? "" : "none";
+    if (running) {
+      show($("#scrapeMsg"), "ok", (s.stage || "running")+ "\n" + (s.lastLine || ""));
+      if (++liveTick % 3 === 0) loadLive();   // refresh the live table every ~4.5s
+    } else if (s.status === "error") {
+      show($("#scrapeMsg"), "err", s.error || "failed");
+      clearInterval(polling);
+    } else if (s.status === "done") {
+      const r = s.result || {};
+      show($("#scrapeMsg"), "ok",
+        "Done — " + (r.imported || 0) + " imported, " + (r.updated || 0) + " updated, " + (r.invalid || 0) + " invalid.");
+      clearInterval(polling);
+      loadLive();     // final rows
+      loadResults();  // surface the new results file without needing a manual refresh
+      if (filteredScrape) {
+        filteredScrape = false;
+        // pick today's newest file + the filtered filter, then download it
+        setTimeout(() => {
+          if ($("#dlFile").options.length) $("#dlFile").selectedIndex = 0;
+          $("#dlFilter").value = "filtered";
+          directDownload("xlsx");
+        }, 800);
+      }
+    } else {
+      hide($("#scrapeMsg"));
+      clearInterval(polling);
+    }
+  };
+  await tick();
+  polling = setInterval(tick, 1500);
+}
+
+// ---- credit report (single IC) ----
+function fmtDT(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso).slice(0, 16).replace("T", " ");
+  return d.toLocaleString(undefined, { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+function fmtDay(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? String(iso).slice(0, 10) : d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
+}
+function statusPill(s) {
+  const v = String(s || "");
+  const cls = /complete/i.test(v) ? "pill-green" : /disburs|approved/i.test(v) ? "pill-amber"
+    : /reject|blacklist|overdue|late/i.test(v) ? "pill-red" : "pill-grey";
+  return "<span class='pill-s " + cls + "'>" + esc(v || "—") + "</span>";
+}
+function money(v) { return (v === null || v === undefined || v === "" || v === 0) ? "—" : esc(String(v)); }
+
+// Client-side "show more" table renderer
+function bigTable(rows, headers, rowFn, pageSize) {
+  let shown = pageSize;
+  const wrap = document.createElement("div");
+  const render = () => {
+    wrap.innerHTML =
+      "<div class='rp-scroll'><table><tbody><tr>" + headers.map(h => "<th>" + esc(h) + "</th>").join("") + "</tr>" +
+      rows.slice(0, shown).map(rowFn).join("") + "</tbody></table></div>" +
+      (shown < rows.length ? "<div class='rp-more'><button class='ghost' data-more>Show more (" + (rows.length - shown) + " left)</button></div>" : "");
+    const b = wrap.querySelector("[data-more]");
+    if (b) b.onclick = () => { shown += 50; render(); };
+  };
+  render();
+  return wrap;
+}
+
+function renderReport(r) {
+  const c = r.customer || {}, sig = r.signals || {};
+  const overdue = +(sig.cardOverdueDays || c.active_overdue_days || 0);
+  const bl = +(c.blacklist_count || 0);
+  const flags = [];
+  if (bl > 0) flags.push("Blacklisted on " + bl + " profile" + (bl > 1 ? "s" : ""));
+  if (overdue > 0) flags.push("Currently " + overdue + " days overdue");
+  if (c.late_penalty_rejected) flags.push(c.late_penalty_rejected + " late-penalty rejection" + (c.late_penalty_rejected > 1 ? "s" : ""));
+
+  const cards = [
+    { l: "Total disbursed", v: sig.totalDisbursed ?? "—" },
+    { l: "Total completed", v: sig.totalCompleted ?? "—" },
+    { l: "Blacklists", v: bl, bad: bl > 0 },
+    { l: "Overdue days", v: overdue, bad: overdue > 0 },
+    { l: "Loan today", v: sig.todayCount ?? "0", bad: +(sig.todayCount || 0) > 0 },
+    { l: "Avg period (d)", v: sig.period || "—" },
+  ];
+
+  const el = $("#report");
+  el.innerHTML =
+    (flags.length ? "<div class='rp-flag'>⚠ Red flags: " + esc(flags.join(" · ")) + ".</div>" : "") +
+    "<div class='rp-name'>" + esc(r.name || c.name || r.ic) + "</div>" +
+    "<div class='rp-cards'>" + cards.map(k =>
+      "<div class='rp-card" + (k.bad ? " bad" : "") + "'><div class='v'>" + esc(String(k.v)) + "</div><div class='l'>" + esc(k.l) + "</div></div>").join("") + "</div>" +
+    "<div class='rp-meta'>" +
+      "<span>IC <b>" + esc(r.ic) + "</b></span>" +
+      "<span>Phone <b>" + esc(r.phone || "—") + "</b></span>" +
+      "<span>DOB <b>" + esc(c.dob || "—") + "</b></span>" +
+      "<span>Last closed <b>" + fmtDay(c.closed_date) + "</b></span>" +
+      "<span>Recent 5 <b>" + esc((sig.recentDetail || []).map(o => o.days + "d/" + o.amt).join(", ") || "—") + "</b></span>" +
+    "</div>";
+
+  // Loan details
+  const loans = r.loans || [];
+  const loanSec = document.createElement("div"); loanSec.className = "rp-sec";
+  loanSec.innerHTML = "<h4>Loan details <span class='cnt'>" + loans.length + "</span></h4>";
+  loanSec.appendChild(bigTable(loans, ["Created", "Repayment", "Status", "Overdue", "Remarks"], l =>
+    "<tr><td>" + fmtDT(l.created_on) + "</td><td>" + statusPill(l.payment_status) + "</td><td>" +
+    statusPill(l.loan_status) + (l.rejection_reason_display ? "<div style='font-size:11px;color:var(--err)'>" + esc(l.rejection_reason_display) + "</div>" : "") +
+    "</td><td>" + (l.is_overdue ? "<span class='pill-s pill-red'>Yes</span>" : "—") + "</td><td>" + esc(l.remark || "—") + "</td></tr>", 10));
+  el.appendChild(loanSec);
+
+  // Transaction log
+  const txs = r.transactions || [];
+  const txSec = document.createElement("div"); txSec.className = "rp-sec";
+  txSec.innerHTML = "<h4>Transaction log <span class='cnt'>" + txs.length + "</span></h4>";
+  txSec.appendChild(bigTable(txs, ["Date", "Type", "Credit", "Debit", "Admin", "Remarks"], t =>
+    "<tr><td>" + fmtDay(t.date) + "</td><td>" + statusPill(t.transaction_type) + "</td><td>" +
+    money(t.credit) + "</td><td>" + money(t.debit) + "</td><td>" + esc(t.admin || "—") + "</td><td>" + esc(t.remark || "—") + "</td></tr>", 10));
+  el.appendChild(txSec);
+
+  // Blacklist
+  const blk = r.blacklist || [];
+  if (blk.length) {
+    const s = document.createElement("div"); s.className = "rp-sec";
+    s.innerHTML = "<h4>Blacklist <span class='cnt'>" + blk.length + "</span></h4>";
+    s.appendChild(bigTable(blk, ["Date", "Reason"], b =>
+      "<tr><td>" + fmtDT(b.date || b.created_on) + "</td><td>" + statusPill(b.reason || b.remark) + "</td></tr>", 10));
+    el.appendChild(s);
+  }
+  el.hidden = false;
+}
+
+async function checkIc() {
+  const ic = $("#icInput").value.trim().replace(/\D/g, "");
+  if (ic.length < 9 || ic.length > 12) return show($("#icMsg"), "err", "Enter a 12-digit IC (dashes are fine).");
+  $("#icBtn").disabled = true;
+  $("#report").hidden = true;
+  show($("#icMsg"), "ok", "Loading credit report for " + ic + "…");
+  try {
+    const r = await api("/credit-report?ic=" + encodeURIComponent(ic));
+    hide($("#icMsg"));
+    renderReport(r);
+  } catch (e) {
+    show($("#icMsg"), "err", /not found|404/i.test(e.message) ? "Not found on KR883 (check the IC)." : e.message);
+  } finally {
+    $("#icBtn").disabled = false;
+  }
+}
+$("#icBtn").onclick = checkIc;
+$("#icInput").onkeydown = e => { if (e.key === "Enter") checkIc(); };
+
+// ---- results ----
+async function loadResults() {
+  const tb = $("#resTable").querySelector("tbody");
+  try {
+    const r = await api("/results");
+    let html = "";
+    if (r.files.length) {
+      // Show only the 3 most recent results files (API returns them newest-first).
+      html += "<tr><th>Results file</th><th class='num'>Rows</th><th>Finished</th><th></th></tr>" +
+        r.files.slice(0, 3).map(f =>
+          "<tr><td>" + esc(f.name) + "</td><td class='num'>" + f.rows + "</td>" +
+          "<td style='color:var(--muted)'>" + esc(fmtDate(f.modified)) + "</td><td class='num'>" +
+          "<button class='linkbtn' style='color:var(--accent)' data-prev=\"" + esc(f.name) + "\">view</button> " +
+          "<a href='/results/" + encodeURIComponent(f.name) + "/download?format=xlsx'>Excel</a> · " +
+          "<a href='/results/" + encodeURIComponent(f.name) + "/download?format=json'>JSON</a>" +
+          "</td></tr>").join("");
+    }
+    // A cache with no matching results file means a run ended before writing results.
+    const orphans = (r.caches || []).filter(c => !c.hasResults);
+    if (orphans.length) {
+      html += "<tr><th colspan='4' style='padding-top:14px'>Scrape cache without a results file</th></tr>" +
+        orphans.map(c =>
+          "<tr><td>" + esc(c.date) + "</td><td class='num'>" + c.records + "</td>" +
+          "<td style='color:var(--muted)'>raw cache</td><td class='num'>" +
+          "<button class='linkbtn' style='color:var(--accent)' data-rebuild=\"" + esc(c.date) + "\">build results</button>" +
+          "</td></tr>").join("");
+    }
+    tb.innerHTML = html || '<tr><td style="color:var(--muted)">No scrapes finished yet.</td></tr>';
+
+    const sel = $("#dlFile"), keep = sel.value;
+    sel.innerHTML = r.files.map(f =>
+      "<option value=\"" + esc(f.name) + "\">" + esc(f.name) + " (" + f.rows + " rows)</option>").join("");
+    if (keep && r.files.some(f => f.name === keep)) sel.value = keep;
+    $("#dlBar").style.display = r.files.length ? "" : "none";
+    if (r.files.length) loadRemarkOptions();
+    tb.querySelectorAll("[data-prev]").forEach(b => b.onclick = () => preview(b.dataset.prev));
+    tb.querySelectorAll("[data-rebuild]").forEach(b => b.onclick = () => rebuild(b.dataset.rebuild));
+  } catch (e) {
+    tb.innerHTML = '<tr><td style="color:var(--err)">' + esc(e.message) + "</td></tr>";
+  }
+}
+
+function dlUrl(fmt) {
+  const f = $("#dlFile").value;
+  if (!f) return null;
+  const p = new URLSearchParams({ format: fmt, filter: $("#dlFilter").value });
+  if ($("#dlRemark").value) p.set("remark", $("#dlRemark").value);
+  if ($("#dlSort").value) p.set("sort", $("#dlSort").value);
+  return "/results/" + encodeURIComponent(f) + "/download?" + p.toString();
+}
+
+// The download endpoint returns JSON on error (e.g. a filter matching nothing), so fetch it and
+// inspect before handing the browser a file - otherwise a failed filter silently saves an
+// error document with an .xlsx name.
+async function doDownload(fmt) {
+  const url = dlUrl(fmt);
+  if (!url) return show($("#dlMsg"), "err", "No results file selected.");
+  show($("#dlMsg"), "ok", "Preparing download…");
+  try {
+    const res = await fetch(url);
+    const type = res.headers.get("content-type") || "";
+    if (!res.ok || type.includes("application/json") && fmt !== "json") {
+      const b = await res.json().catch(() => ({}));
+      return show($("#dlMsg"), "warn", b.error || ("Download failed (" + res.status + ")"));
+    }
+    const blob = await res.blob();
+    const cd = res.headers.get("content-disposition") || "";
+    const m = /filename="([^"]+)"/.exec(cd);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = m ? m[1] : "kw388_results." + fmt;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    show($("#dlMsg"), "ok", "Downloaded " + a.download + " (" + Math.round(blob.size / 1024) + " KB)");
+  } catch (e) {
+    show($("#dlMsg"), "err", e.message);
+  }
+}
+
+function directDownload(fmt) {
+  const url = dlUrl(fmt);
+  if (!url) return show($("#dlMsg"), "err", "No results file selected.");
+  // Plain browser download via a real anchor (cookie-authenticated, native save dialog).
+  // More reliable than fetch+blob, which some browsers/extensions block silently.
+  const a = document.createElement("a");
+  a.href = url; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+  show($("#dlMsg"), "ok", "Download started. If nothing happens, right-click the Excel link in the table below and choose Save link as.");
+}
+$("#dlBtn").onclick = () => directDownload("xlsx");
+$("#dlJson").onclick = () => directDownload("json");
+
+async function rebuild(date) {
+  show($("#resMsg"), "ok", "Building results from the " + date + " cache…");
+  try {
+    const r = await api("/results/rebuild", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ date })
+    });
+    show($("#resMsg"), r.warning ? "warn" : "ok",
+      "Built " + r.file + " — " + r.rows + " rows from " + r.cached + " cached records." +
+      (r.warning ? "\n" + r.warning : ""));
+    loadResults();
+  } catch (e) { show($("#resMsg"), "err", e.message); }
+}
+
+// Table state, shared by the saved-results view and the live view.
+let TBL = { cols: [], rows: [], sortKey: null, sortDir: -1, title: "" };
+
+async function preview(name) {
+  try {
+    const r = await api("/results/" + encodeURIComponent(name) + "/preview?limit=500");
+    setTable(r, name);
+  } catch (e) { show($("#resMsg"), "err", e.message); }
+}
+
+function setTable(r, title) {
+  TBL.cols = r.columns;
+  TBL.rows = r.rows;
+  TBL.title = title + " — " + r.shown + " of " + r.total + " rows";
+  const sel = $("#remarkFilter"), cur = sel.value;
+  sel.innerHTML = "<option value=''>All remarks</option>" +
+    (r.remarkCodes || []).map(c => "<option value=\"" + esc(c) + "\">" + esc(c) + "</option>").join("");
+  sel.value = cur;
+  renderTable();
+  $("#previewWrap").style.display = "";
+}
+
+function renderTable() {
+  const code = $("#remarkFilter").value;
+  const q = $("#rowSearch").value.trim().toLowerCase();
+  let rows = TBL.rows;
+  if (code) rows = rows.filter(r => (r._codes || []).includes(code));
+  if (q) rows = rows.filter(r =>
+    (r.fullName || "").toLowerCase().includes(q) || (r.icNumber || "").includes(q));
+
+  if (TBL.sortKey) {
+    const col = TBL.cols.find(c => c.key === TBL.sortKey);
+    const num = col && col.numeric;
+    rows = rows.slice().sort((a, b) => {
+      const x = num ? (a["_" + TBL.sortKey] ?? 0) : String(a[TBL.sortKey] ?? "");
+      const y = num ? (b["_" + TBL.sortKey] ?? 0) : String(b[TBL.sortKey] ?? "");
+      return (num ? (x - y) : x.localeCompare(y)) * TBL.sortDir;
+    });
+  }
+
+  $("#previewTitle").textContent = TBL.title + (rows.length !== TBL.rows.length ? "  (" + rows.length + " shown)" : "");
+  const tb = $("#previewTable").querySelector("tbody");
+  tb.innerHTML =
+    "<tr>" + TBL.cols.map(c =>
+      "<th style='cursor:pointer; white-space:nowrap; position:sticky; top:0; background:var(--panel)' data-sort=\"" + esc(c.key) + "\">" +
+      esc(c.label) + (TBL.sortKey === c.key ? (TBL.sortDir > 0 ? " ▲" : " ▼") : "") + "</th>").join("") + "</tr>" +
+    rows.map(row => "<tr>" + TBL.cols.map(c =>
+      "<td style='white-space:nowrap'>" + esc(row[c.key] ?? "") + "</td>").join("") + "</tr>").join("");
+
+  tb.querySelectorAll("[data-sort]").forEach(th => th.onclick = () => {
+    const k = th.dataset.sort;
+    // Numeric columns start high-to-low (most loans today first); text starts A-Z.
+    if (TBL.sortKey === k) TBL.sortDir *= -1;
+    else { TBL.sortKey = k; TBL.sortDir = (TBL.cols.find(c => c.key === k) || {}).numeric ? -1 : 1; }
+    renderTable();
+  });
+}
+
+async function loadRemarkOptions() {
+  const f = $("#dlFile").value;
+  if (!f) return;
+  try {
+    const r = await api("/results/" + encodeURIComponent(f) + "/preview?limit=1");
+    const sel = $("#dlRemark"), keep = sel.value;
+    sel.innerHTML = "<option value=''>Any remark</option>" +
+      (r.remarkCodes || []).map(c => "<option value=\"" + esc(c) + "\">" + esc(c) + "</option>").join("");
+    if (keep) sel.value = keep;
+  } catch (e) { /* leave the existing options in place */ }
+}
+$("#dlFile").onchange = loadRemarkOptions;
+
+$("#remarkFilter").onchange = renderTable;
+$("#rowSearch").oninput = renderTable;
+$("#closePreview").onclick = () => { $("#previewWrap").style.display = "none"; };
+
+// While a scrape runs, pull rows as they're produced.
+async function loadLive() {
+  try {
+    const r = await api("/results/live?limit=1000");
+    if (r.total > 0) setTable(r, "Live — scrape in progress");
+  } catch (e) { /* transient during startup; the next poll retries */ }
+}
+
+// ---- export ----
+$("#export").onclick = async () => {
+  const body = { source: $("#src").value };
+  if ($("#ws").value.trim()) body.worksheet = $("#ws").value.trim();
+  show($("#expMsg"), "ok", "Exporting…");
+  $("#export").disabled = true;
+  try {
+    const r = await api("/export/sheets", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    $("#expMsg").className = "msg show ok";
+    $("#expMsg").innerHTML = "Exported " + r.rows + " rows to “" + esc(r.worksheet) +
+      "” — <a href='" + esc(r.spreadsheetUrl) + "' target='_blank' rel='noopener'>open the sheet</a>";
+  } catch (e) {
+    show($("#expMsg"), "err", e.message);
+  } finally { $("#export").disabled = false; }
+};
+
+$("#refresh").onclick = () => { loadHealth(); loadFiles(); loadResults(); };
+loadHealth(); loadFiles(); loadResults(); poll();
+</script>
+</body>
+</html>

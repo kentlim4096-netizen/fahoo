@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KR883 Members</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --panel: #ffffff; --border: #e3e7ee; --text: #16181d; --muted: #6b7280;
+    --accent: #4f46e5; --accent-fg: #fff; --ok: #157f4b; --ok-bg: #e7f6ee;
+    --warn: #8a5a00; --warn-bg: #fdf3dd; --err: #b42318; --err-bg: #fdeceb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0f1115; --panel: #171a20; --border: #262b34; --text: #e8eaed; --muted: #9aa3af;
+      --accent: #6d5efc; --accent-fg: #0b1020; --ok: #6ee7a8; --ok-bg: #10291d;
+      --warn: #f0c674; --warn-bg: #2e2413; --err: #ff9a92; --err-bg: #331714; color-scheme: dark; }
+  }
+  :root[data-theme="dark"] { --bg: #0f1115; --panel: #171a20; --border: #262b34; --text: #e8eaed; --muted: #9aa3af;
+    --accent: #6d5efc; --accent-fg: #0b1020; --ok: #6ee7a8; --ok-bg: #10291d;
+    --warn: #f0c674; --warn-bg: #2e2413; --err: #ff9a92; --err-bg: #331714; color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .topbar { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 14px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .brand { font-weight: 800; font-size: 17px; letter-spacing: -0.02em; }
+  .brand span { color: var(--accent); }
+  .nav a { color: var(--muted); text-decoration: none; font-size: 14px; margin-right: 14px; }
+  .nav a.on, .nav a:hover { color: var(--text); }
+  .grow { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  button { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 10px;
+    padding: 9px 16px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); font-weight: 600; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1400px; margin: 0 auto; padding: 20px 20px 80px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .tab { background: none; color: var(--muted); border: 0; border-bottom: 3px solid transparent; border-radius: 0; padding: 10px 18px; font-size: 15px; font-weight: 700; }
+  .tab:hover:not(:disabled) { filter: none; color: var(--text); }
+  .tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; margin-bottom: 16px; overflow: hidden; }
+  .pad { padding: 18px; }
+  .panel h3 { margin: 0 0 4px; font-size: 16px; }
+  .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  label.f { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  input, select { background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 9px 12px; font-size: 14px; font-family: inherit; min-width: 0; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  input:focus, select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 16px 0; }
+  .stat { border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; background: var(--bg); }
+  .stat .v { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+  .stat .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .bar { height: 8px; background: var(--border); border-radius: 999px; overflow: hidden; margin-top: 10px; }
+  .bar > i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .4s; }
+  .filters { padding: 16px 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; align-items: end; }
+  .filters .actions { display: flex; gap: 10px; justify-content: flex-end; grid-column: 1 / -1; align-items: center; }
+  .scroll { overflow: auto; max-height: 66vh; border-top: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 14px; white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--muted); font-weight: 600; font-size: 11.5px;
+    text-transform: uppercase; letter-spacing: .04em; cursor: pointer; user-select: none; z-index: 1; border-bottom: 1px solid var(--border); }
+  th.sorted { color: var(--text); }
+  tbody tr { border-top: 1px solid var(--border); }
+  tbody tr:hover { background: var(--bg); }
+  td.num { font-variant-numeric: tabular-nums; }
+  td a { text-decoration: none; font-weight: 600; }
+  .sub2 { color: var(--muted); font-size: 12px; }
+  .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; background: var(--border); color: var(--muted); }
+  .pill.green { background: var(--ok-bg); color: var(--ok); }
+  .pill.amber { background: var(--warn-bg); color: var(--warn); }
+  .pill.red { background: var(--err-bg); color: var(--err); }
+  .pill.blue { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .pager { padding: 12px 18px; display: flex; gap: 10px; align-items: center; justify-content: flex-end; border-top: 1px solid var(--border); font-size: 14px; color: var(--muted); flex-wrap: wrap; }
+  .pager button { padding: 6px 12px; }
+  .pager input[type=number] { width: 72px; padding: 6px 8px; text-align: center; }
+  .pager select { padding: 6px 8px; }
+  .empty { text-align: center; color: var(--muted); padding: 60px 20px; }
+  .msg { padding: 12px 16px; border-radius: 10px; font-size: 14px; margin-bottom: 14px; background: var(--err-bg); color: var(--err); }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+<script>
+  try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">KR<span>883</span> · Members</div>
+    <div class="nav"><a href="/">Control panel</a><a href="/report">Credit report</a><a href="/members-list" class="on">Members</a></div>
+    <div class="grow">
+      <button id="theme" class="ghost" type="button" title="Switch light / dark theme">Theme</button>
+      <a href="/logout" style="font-size:13px">Sign out</a>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div id="err" class="msg" hidden></div>
+    <div class="tabs">
+      <button class="tab on" data-tab="list" type="button">Member list</button>
+      <button class="tab" data-tab="scrape" type="button">Scrape</button>
+    </div>
+
+    <!-- ============ Member list tab ============ -->
+    <section id="tab-list">
+      <div class="panel">
+        <div class="filters">
+          <label class="f">Name<input id="fName" type="search" placeholder="e.g. Ali"></label>
+          <label class="f">IC<input id="fIc" type="search" placeholder="901010-10-1234"></label>
+          <label class="f">Phone<input id="fPhone" type="search" placeholder="e.g. 0123456789"></label>
+          <label class="f">Event<select id="fEvent"><option value="">All events</option></select></label>
+          <label class="f">Type<select id="fType"><option value="">All types</option></select></label>
+          <label class="f">Admin<select id="fAdmin"><option value="">All admins</option></select></label>
+          <label class="f">Group<select id="fGroup"><option value="">All groups</option></select></label>
+          <label class="f">Assigned from<input id="fFrom" type="date"></label>
+          <label class="f">Assigned to<input id="fTo" type="date"></label>
+          <div class="actions">
+            <span class="sub2" id="count"></span>
+            <button class="ghost" id="clear" type="button">✕ Clear</button>
+            <select id="fmt" title="Export format" style="padding:9px 10px"><option value="xlsx">Excel (.xlsx)</option><option value="csv">CSV</option><option value="json">JSON</option></select>
+            <button id="dl" type="button">⬇ Export</button>
+            <button class="ghost" id="dlAll" type="button" title="Export every saved member, ignoring the filters">Export all</button>
+          </div>
+        </div>
+        <div class="scroll"><table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table></div>
+        <div class="empty" id="empty" hidden></div>
+        <div class="pager">
+          <span>Records per page:</span>
+          <select id="fSize"><option>20</option><option selected>50</option><option>100</option><option>200</option></select>
+          <span id="range"></span>
+          <button class="ghost" id="first" type="button" title="First page">«</button>
+          <button class="ghost" id="prev" type="button" title="Previous page">‹</button>
+          <span>Page</span><input id="pageIn" type="number" min="1" value="1"><span id="ofPages">of 1</span>
+          <button class="ghost" id="next" type="button" title="Next page">›</button>
+          <button class="ghost" id="last" type="button" title="Last page">»</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Scrape tab ============ -->
+    <section id="tab-scrape" hidden>
+      <div class="panel pad">
+        <h3>Scrape from KR883</h3>
+        <div class="sub">Pulls the member list (100 members per page) into a local copy that the Member list tab reads. New scrapes are merged in by member, so you can scrape a few pages at a time.</div>
+        <div class="grid">
+          <label class="f">Assigned from<input id="sFrom" type="date"></label>
+          <label class="f">Assigned to<input id="sTo" type="date"></label>
+          <label class="f">Start at page<input id="sStart" type="number" min="1" value="1"></label>
+          <label class="f">How many pages<input id="sPages" type="number" min="1" placeholder="all available"></label>
+        </div>
+        <div class="grid" style="margin-top:12px">
+          <label class="f">Speed<select id="sSpeed">
+            <option value="3,5">Human — 3–5 s per page</option>
+            <option value="1,2">Fast — 1–2 s per page</option>
+            <option value="0.3,0.6">Very fast — under 1 s</option>
+            <option value="0,0">Maximum — no pause</option>
+            <option value="custom">Custom…</option></select></label>
+          <label class="f" id="cMinW" hidden>Min seconds<input id="sMin" type="number" min="0" max="60" step="0.1" value="3"></label>
+          <label class="f" id="cMaxW" hidden>Max seconds<input id="sMax" type="number" min="0" max="60" step="0.1" value="5"></label>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="v" id="avMembers">—</div><div class="l">Members available</div></div>
+          <div class="stat"><div class="v" id="avPages">—</div><div class="l">Pages available (100 each)</div></div>
+          <div class="stat"><div class="v" id="willPages">—</div><div class="l">Pages this run will scrape</div></div>
+          <div class="stat"><div class="v" id="willTime">—</div><div class="l">Estimated time</div></div>
+        </div>
+        <div class="row">
+          <button id="scrape" type="button">Scrape members</button>
+          <button class="ghost" id="stop" type="button" hidden>Stop</button>
+          <button class="ghost" id="refresh" type="button">↻ Refresh available</button>
+          <label class="sub2" style="display:flex;gap:6px;align-items:center"><input id="sReplace" type="checkbox" style="min-width:0"> Replace saved list instead of merging</label>
+          <span style="flex:1"></span>
+          <button class="ghost" id="wipe" type="button">Delete saved list</button>
+        </div>
+        <div class="bar" id="barWrap" hidden><i id="bar"></i></div>
+        <div id="scrapeLine" class="note">Loading…</div>
+      </div>
+    </section>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = v => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const COLS = [
+  ["name", "Customer"], ["loanAmount", "Loan amount", 1], ["onHand", "On-hand", 1], ["customerType", "Type"],
+  ["event", "Event"], ["assigned", "Assigned"], ["distributedAt", "Distributed"], ["createdAt", "Created"], ["callCount", "Call log", 1],
+];
+const SORT = { assigned: "groups", name: "name" };
+let st = { page: 1, sort: "distributedAt", dir: "desc", pages: 1 }, timer = null, wasRunning = false, avail = { count: 0, pages: 0 };
+
+/* ---- theme ---- */
+function themeNow() { return document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+function paintTheme() { $("#theme").textContent = themeNow() === "dark" ? "☀ Light" : "🌙 Dark"; }
+$("#theme").onclick = () => { const n = themeNow() === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", n); try { localStorage.setItem("theme", n); } catch (e) {} paintTheme(); };
+paintTheme();
+
+/* ---- tabs ---- */
+function showTab(t) {
+  document.querySelectorAll(".tab").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
+  $("#tab-list").hidden = t !== "list"; $("#tab-scrape").hidden = t !== "scrape";
+  try { localStorage.setItem("membersTab", t); } catch (e) {}
+  if (t === "scrape") loadAvailable();
+}
+document.querySelectorAll(".tab").forEach(b => b.onclick = () => showTab(b.dataset.tab));
+
+/* ---- list ---- */
+function pill(v, kind) { return v ? "<span class='pill " + (kind || "") + "'>" + esc(v) + "</span>" : "—"; }
+function evKind(v) { return /completed|repaid/i.test(v) ? "green" : /extend/i.test(v) ? "amber" : /overdue|reject|black/i.test(v) ? "red" : ""; }
+function fmtDT(v) { if (!v) return "—"; const d = new Date(v.length <= 19 ? v + "Z" : v); return isNaN(d) ? esc(v) : d.toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kuala_Lumpur" }); }
+function rm(v) { const n = parseFloat(v); return isNaN(n) ? "—" : "RM " + n.toLocaleString("en-MY", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function cell(k, r) {
+  switch (k) {
+    case "name": return "<b>" + esc(r.name) + "</b><br><a href='/report?ic=" + esc(r.ic) + "' target='_blank' title='Open credit report' class='sub2' style='font-family:monospace;text-decoration:none'>" + esc(r.ic.length === 12 ? r.ic.slice(0, 6) + "-" + r.ic.slice(6, 8) + "-" + r.ic.slice(8) : r.ic) + "</a><br><span class='sub2'>" + esc(r.phone || "") + "</span>";
+    case "loanAmount": return rm(r.loanAmount) + (r.tenureDays != null ? " <span class='sub2'>· " + esc(r.tenureDays) + " days</span>" : "");
+    case "onHand": return rm(r.onHand);
+    case "customerType": return pill(r.customerType, r.customerType === "new" ? "green" : "");
+    case "event": return pill(r.event, evKind(r.event));
+    case "assigned": {
+      const g = (r.groups || "").split(", ").filter(Boolean).map(x => pill(x, "blue")).join(" ");
+      const v = (r.viewers || "").split(", ").filter(Boolean);
+      return (g + (v.length ? " <span class='pill' title='" + esc(v.join(", ")) + "'>" + v.length + " admin" + (v.length > 1 ? "s" : "") + "</span>" : "")) || "—";
+    }
+    case "distributedAt": case "createdAt": return fmtDT(r[k]);
+    case "callCount": return r.callCount ? esc(r.callCount) + (r.callNote ? "<br><span class='sub2'>" + esc(r.callNote.slice(0, 40)) + "</span>" : "") : "<span class='sub2'>—</span>";
+  }
+  return esc(r[k]);
+}
+function head() {
+  $("#head").innerHTML = COLS.map(([k, l]) => { const sk = SORT[k] || k; return "<th data-k='" + sk + "' class='" + (st.sort === sk ? "sorted" : "") + "'>" + l + (st.sort === sk ? (st.dir === "asc" ? " ▲" : " ▼") : "") + "</th>"; }).join("");
+  $("#head").querySelectorAll("th").forEach(th => th.onclick = () => { const k = th.dataset.k; st.dir = st.sort === k && st.dir === "desc" ? "asc" : "desc"; st.sort = k; st.page = 1; load(); });
+}
+function params(extra) {
+  return new URLSearchParams({ name: $("#fName").value.trim(), ic: $("#fIc").value.trim(), phone: $("#fPhone").value.trim(),
+    event: $("#fEvent").value, type: $("#fType").value, admin: $("#fAdmin").value, group: $("#fGroup").value,
+    from_date: $("#fFrom").value, to_date: $("#fTo").value, ...extra }).toString();
+}
+function fillSelect(sel, items) {
+  const cur = sel.value, first = sel.options[0].outerHTML;
+  sel.innerHTML = first + items.map(i => "<option>" + esc(i) + "</option>").join("");
+  if (items.includes(cur)) sel.value = cur;
+}
+async function load() {
+  head();
+  try {
+    const res = await fetch("/members/data?" + params({ page: st.page, size: $("#fSize").value, sort: st.sort, dir: st.dir }));
+    if (!res.ok) throw new Error("Request failed (" + res.status + ")");
+    const d = await res.json();
+    fillSelect($("#fEvent"), d.facets.events); fillSelect($("#fType"), d.facets.types);
+    fillSelect($("#fGroup"), d.facets.groups); fillSelect($("#fAdmin"), d.facets.admins);
+    $("#err").hidden = true;
+    $("#body").innerHTML = d.rows.map(r => "<tr>" + COLS.map(([k, , n]) => "<td" + (n ? " class='num'" : "") + ">" + cell(k, r) + "</td>").join("") + "</tr>").join("");
+    st.pages = Math.max(1, Math.ceil(d.matched / d.size));
+    const from = d.matched ? (d.page - 1) * d.size + 1 : 0, to = Math.min(d.page * d.size, d.matched);
+    $("#range").textContent = from + "–" + to + " of " + d.matched.toLocaleString();
+    $("#count").textContent = d.matched !== d.total ? d.matched.toLocaleString() + " of " + d.total.toLocaleString() + " saved members" : d.total.toLocaleString() + " saved members";
+    $("#pageIn").value = d.page; $("#pageIn").max = st.pages; $("#ofPages").textContent = "of " + st.pages.toLocaleString();
+    $("#first").disabled = $("#prev").disabled = d.page <= 1; $("#next").disabled = $("#last").disabled = d.page >= st.pages;
+    const em = $("#empty"); em.hidden = d.rows.length > 0;
+    em.innerHTML = d.total === 0 ? "No members saved yet — open the <b>Scrape</b> tab to pull some in." : "No members match these filters.";
+  } catch (e) { $("#err").textContent = e.message; $("#err").hidden = false; }
+}
+const go = p => { st.page = Math.min(Math.max(1, p), st.pages); load(); };
+$("#first").onclick = () => go(1); $("#prev").onclick = () => go(st.page - 1);
+$("#next").onclick = () => go(st.page + 1); $("#last").onclick = () => go(st.pages);
+$("#pageIn").onchange = e => go(parseInt(e.target.value) || 1);
+$("#dl").onclick = () => { location.href = "/members/download?" + params({ format: $("#fmt").value }); };
+$("#dlAll").onclick = () => { location.href = "/members/download?format=" + $("#fmt").value; };
+$("#clear").onclick = () => { ["#fName", "#fIc", "#fPhone", "#fFrom", "#fTo"].forEach(s => $(s).value = ""); ["#fEvent", "#fType", "#fAdmin", "#fGroup"].forEach(s => $(s).value = ""); st.page = 1; load(); };
+let qt; ["#fName", "#fIc", "#fPhone"].forEach(s => $(s).oninput = () => { clearTimeout(qt); qt = setTimeout(() => { st.page = 1; load(); }, 250); });
+["#fEvent", "#fType", "#fAdmin", "#fGroup", "#fFrom", "#fTo", "#fSize"].forEach(s => $(s).onchange = () => { st.page = 1; load(); });
+
+/* ---- scrape tab ---- */
+function dur(sec) { return sec < 90 ? Math.round(sec) + " s" : sec < 5400 ? Math.round(sec / 60) + " min" : (sec / 3600).toFixed(1) + " h"; }
+function delays() {
+  const v = $("#sSpeed").value;
+  if (v === "custom") { let a = parseFloat($("#sMin").value) || 0, b = parseFloat($("#sMax").value) || 0; if (a > b) [a, b] = [b, a]; return [a, b]; }
+  return v.split(",").map(Number);
+}
+$("#sSpeed").onchange = () => { const c = $("#sSpeed").value === "custom"; $("#cMinW").hidden = $("#cMaxW").hidden = !c; plan(); try { localStorage.setItem("membersSpeed", $("#sSpeed").value); } catch (e) {} };
+["#sMin", "#sMax"].forEach(s => $(s).oninput = plan);
+try { const sp = localStorage.getItem("membersSpeed"); if (sp && [...$("#sSpeed").options].some(o => o.value === sp)) { $("#sSpeed").value = sp; $("#sSpeed").onchange(); } } catch (e) {}
+function plan() {
+  const start = Math.max(1, parseInt($("#sStart").value) || 1), want = parseInt($("#sPages").value) || 0;
+  const left = Math.max(0, avail.pages - start + 1), n = want ? Math.min(want, left) : left;
+  $("#willPages").textContent = avail.pages ? n.toLocaleString() : "—";
+  const [dlo, dhi] = delays();
+  $("#willTime").textContent = avail.pages ? dur(Math.max(0, n - 1) * ((dlo + dhi) / 2) + n * 0.7) : "—";
+  return { start, n };
+}
+async function loadAvailable() {
+  $("#avMembers").textContent = $("#avPages").textContent = "…";
+  try {
+    const q = new URLSearchParams({ from_date: $("#sFrom").value, to_date: $("#sTo").value }).toString();
+    const res = await fetch("/members/available?" + q); const d = await res.json();
+    if (!res.ok) throw new Error(d.error || "Request failed");
+    avail = d; $("#avMembers").textContent = d.count.toLocaleString(); $("#avPages").textContent = d.pages.toLocaleString();
+    $("#sPages").max = d.pages; $("#sStart").max = d.pages; plan();
+  } catch (e) { $("#avMembers").textContent = $("#avPages").textContent = "—"; $("#scrapeLine").innerHTML = "<span style='color:var(--err)'>" + esc(e.message) + "</span>"; }
+}
+["#sFrom", "#sTo"].forEach(s => $(s).onchange = loadAvailable);
+["#sStart", "#sPages"].forEach(s => $(s).oninput = plan);
+$("#refresh").onclick = loadAvailable;
+async function poll() {
+  try {
+    const s = await (await fetch("/members/status")).json();
+    const running = s.status === "running";
+    $("#scrape").disabled = running; $("#stop").hidden = !running; $("#barWrap").hidden = !running;
+    $("#bar").style.width = (s.pages ? Math.round(100 * (s.done || 0) / s.pages) : 0) + "%";
+    let line;
+    if (running) line = "Scraping… page <b>" + s.page + "</b> (" + (s.done || 0) + " of " + (s.pages || "?") + " this run) — <b>" + s.rows.toLocaleString() + "</b> members so far";
+    else if (s.status === "error") line = "<span style='color:var(--err)'>Scrape failed: " + esc(s.error) + "</span>";
+    else if (s.status === "stopped") line = "Scrape stopped — nothing was saved from that run.";
+    else if (s.status === "done") line = "Last run finished: " + s.rows.toLocaleString() + " members from " + (s.done || 0) + " pages. Saved list now has <b>" + s.saved.toLocaleString() + "</b> members.";
+    else line = s.saved ? "Saved list: <b>" + s.saved.toLocaleString() + "</b> members, last updated " + esc((s.savedAt || "").replace("T", " ")) : "Nothing saved yet.";
+    $("#scrapeLine").innerHTML = line;
+    if (wasRunning && !running) load();
+    wasRunning = running;
+    clearTimeout(timer); timer = setTimeout(poll, running ? 3000 : 10000);
+  } catch (e) { clearTimeout(timer); timer = setTimeout(poll, 10000); }
+}
+$("#scrape").onclick = async () => {
+  const { start, n } = plan();
+  if (avail.pages && n < 1) { $("#scrapeLine").innerHTML = "<span style='color:var(--err)'>Start page is past the last available page (" + avail.pages + ").</span>"; return; }
+  const [dlo, dhi] = delays();
+  const q = new URLSearchParams({ start, from_date: $("#sFrom").value, to_date: $("#sTo").value, delay_min: dlo, delay_max: dhi });
+  if ($("#sPages").value) q.set("pages", $("#sPages").value);
+  if ($("#sReplace").checked) q.set("replace", "1");
+  $("#scrape").disabled = true; await fetch("/members/scrape?" + q, { method: "POST" }); poll();
+};
+$("#stop").onclick = async () => { await fetch("/members/stop", { method: "POST" }); poll(); };
+$("#wipe").onclick = async () => {
+  if (!confirm("Delete the saved member list on this computer? (KR883 itself is not touched.)")) return;
+  const r = await fetch("/members/clear", { method: "POST" }); if (!r.ok) alert((await r.json()).error || "Failed");
+  st.page = 1; load(); poll();
+};
+
+let t0 = "list"; try { t0 = localStorage.getItem("membersTab") || "list"; } catch (e) {}
+showTab(t0 === "scrape" ? "scrape" : "list");
+load(); poll();
+</script>
+</body>
+</html>

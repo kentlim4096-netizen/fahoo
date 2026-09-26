@@ -1,0 +1,30 @@
+# Real credentials — never commit.
+.env
+google-credentials.json
+
+# Candidate list files + scrape state — local to each machine, not source.
+data/
+
+# Local native-run virtualenv (see run-local.ps1) — machine-specific, not source.
+.venv/
+
+__pycache__/
+*.pyc
+
+# ---- Secrets / machine-specific / large - never commit ----
+# OTP QR code (contains the KR883 TOTP secret) and any other QR/screenshots at the project root.
+TOTP.png
+/*.png
+# Downloaded ngrok binary (get it from ngrok.com) and its per-machine route list.
+tools/bin/
+tools/ngrok-bypass-routes.txt
+# Any real env file or key material.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+google-credentials*.json
+# Logs, browser profiles, recordings and saved data all live under data/ (already ignored above).
+*.log
+*.log.*

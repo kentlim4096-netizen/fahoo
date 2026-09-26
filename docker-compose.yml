@@ -1,0 +1,33 @@
+# Standalone credit report tool — runs on its own, talking to the backend API over the network.
+# Nothing else needed here at all — just this one container.
+#
+#   cp .env.example .env      # then fill in real credentials
+#   mkdir -p data/storage/kw-candidates
+#   # copy your candidate list Excel file(s) into data/storage/kw-candidates/
+#   docker compose up -d --build
+name: credit-report-tool
+
+services:
+  scraper:
+    build: .
+    restart: unless-stopped
+    # Without a real PID 1, orphaned Chromium subprocesses (Playwright's driver exits before the
+    # browser it launched does) never get reaped and pile up as zombies. `init: true` makes
+    # Docker run tini as PID 1, which reaps them automatically.
+    init: true
+    # The README's curl examples target localhost:8765, but without this the port is only
+    # reachable from inside the compose network. Bound to 127.0.0.1 so it stays off the LAN.
+    ports:
+      - "127.0.0.1:8765:8765"
+    env_file:
+      - .env
+    volumes:
+      # Candidate list Excel file(s) — drop your .xlsx into data/storage/kw-candidates/.
+      - ./data/storage:/data/storage
+      # Chromium's persistent login profile + crash-resume cache — survives container restarts.
+      - scraper-profile:/data/kw_profile
+      - scraper-cache:/data/kw_cache
+
+volumes:
+  scraper-profile:
+  scraper-cache:

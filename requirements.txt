@@ -1,0 +1,9 @@
+aiohttp==3.10.10
+openpyxl==3.1.5
+playwright==1.48.0
+# Google Sheets export (POST /export/sheets). Only imported when an export actually runs, so the
+# service still starts fine if these are absent.
+gspread==6.1.4
+google-auth==2.35.0
+# QR decoding for tools/import_totp_qr.py — not imported by the service itself.
+opencv-python-headless==4.10.0.84

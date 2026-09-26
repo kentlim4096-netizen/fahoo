@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KR883 Credit Report</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --panel: #ffffff; --border: #e3e7ee; --text: #16181d; --muted: #6b7280;
+    --accent: #4f46e5; --accent-fg: #fff; --ok: #157f4b; --ok-bg: #e7f6ee;
+    --warn: #8a5a00; --warn-bg: #fdf3dd; --err: #b42318; --err-bg: #fdeceb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #0f1115; --panel: #171a20; --border: #262b34; --text: #e8eaed; --muted: #9aa3af;
+      --accent: #6d5efc; --accent-fg: #0b1020; --ok: #6ee7a8; --ok-bg: #10291d;
+      --warn: #f0c674; --warn-bg: #2e2413; --err: #ff9a92; --err-bg: #331714; }
+  }
+  :root[data-theme="dark"] { --bg: #0f1115; --panel: #171a20; --border: #262b34; --text: #e8eaed; --muted: #9aa3af;
+    --accent: #6d5efc; --accent-fg: #0b1020; --ok: #6ee7a8; --ok-bg: #10291d;
+    --warn: #f0c674; --warn-bg: #2e2413; --err: #ff9a92; --err-bg: #331714; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .topbar { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 14px 20px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .brand { font-weight: 800; font-size: 17px; letter-spacing: -0.02em; }
+  .brand span { color: var(--accent); }
+  .searchbox { display: flex; gap: 8px; flex: 1; min-width: 260px; max-width: 560px; }
+  .searchbox input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 11px 14px; font-size: 16px; font-variant-numeric: tabular-nums; }
+  .searchbox input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  button { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 10px;
+    padding: 11px 20px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  button:hover:not(:disabled) { filter: brightness(1.08); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); font-weight: 600; padding: 8px 14px; font-size: 13px; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 22px 20px 80px; }
+  .msg { padding: 14px 16px; border-radius: 10px; font-size: 14px; margin: 10px 0; display: none; }
+  .msg.show { display: block; } .msg.ok { background: var(--ok-bg); color: var(--ok); }
+  .msg.err { background: var(--err-bg); color: var(--err); }
+  .empty { text-align: center; color: var(--muted); padding: 80px 20px; font-size: 15px; }
+  .empty .big { font-size: 44px; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 14px; white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; }
+  tbody tr { border-top: 1px solid var(--border); }
+  /* report */
+  .rp-flag { background: var(--err-bg); color: var(--err); border: 1px solid color-mix(in srgb, var(--err) 30%, transparent);
+    border-radius: 12px; padding: 14px 18px; margin: 4px 0 18px; font-size: 15px; font-weight: 700; }
+  .rp-name { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; margin: 4px 0 4px; }
+  .rp-sub { color: var(--muted); font-size: 13.5px; margin-bottom: 18px; }
+  .rp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-bottom: 20px; }
+  .rp-card { border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; background: var(--panel); }
+  .rp-card.bad { border-color: color-mix(in srgb, var(--err) 45%, transparent); background: var(--err-bg); }
+  .rp-card .v { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.05; }
+  .rp-card.bad .v { color: var(--err); }
+  .rp-card .l { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 5px; }
+  .rp-meta { display: flex; flex-wrap: wrap; gap: 10px 30px; font-size: 14px; color: var(--muted); margin-bottom: 22px; }
+  .rp-meta b { color: var(--text); font-weight: 700; }
+  .rp-sec { border: 1px solid var(--border); border-radius: 14px; margin-bottom: 16px; overflow: hidden; background: var(--panel); }
+  .rp-sec > h4 { margin: 0; padding: 13px 18px; font-size: 14.5px; background: var(--bg);
+    border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 9px; }
+  .rp-sec > h4 .cnt { background: var(--border); color: var(--muted); border-radius: 999px; padding: 2px 10px; font-size: 12.5px; font-weight: 700; }
+  .rp-scroll { max-height: 380px; overflow: auto; }
+  .rp-sec th { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+  .pill-s { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 700; }
+  .pill-green { background: var(--ok-bg); color: var(--ok); }
+  .pill-red { background: var(--err-bg); color: var(--err); }
+  .pill-amber { background: var(--warn-bg); color: var(--warn); }
+  .pill-grey { background: var(--border); color: var(--muted); }
+  .rp-more { padding: 11px; text-align: center; }
+  .rp-admins .tools { display: flex; gap: 12px; align-items: center; padding: 14px 18px; flex-wrap: wrap; }
+  .rp-admins select { flex: 1; min-width: 240px; max-width: 460px; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    border-radius: 10px; padding: 10px 12px; font-size: 14.5px; font-family: inherit; cursor: pointer; }
+  .rp-admins select:focus { outline: 2px solid var(--accent); border-color: transparent; }
+  .rp-admins .hint { color: var(--muted); font-size: 12.5px; }
+  .theme-btn { padding: 8px 12px; font-size: 13px; }
+  .rp-empty { padding: 22px; text-align: center; color: var(--muted); font-size: 14px; }
+  [hidden] { display: none !important; }
+</style>
+<script>
+  try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}
+</script>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">KR<span>883</span> · Credit Report</div>
+    <div class="searchbox">
+      <input id="ic" type="text" placeholder="Enter IC — 960924085285 or 960924-08-5285" autofocus>
+      <button id="go">Search</button>
+    </div>
+    <button id="theme" class="ghost theme-btn" type="button" style="margin-left:auto" title="Switch light / dark theme">Theme</button>
+    <a href="/logout" style="font-size:13px">Sign out</a>
+  </div>
+
+  <div class="wrap">
+    <div class="msg" id="msg"></div>
+    <div class="empty" id="empty"><div class="big">🔎</div>Enter an IC above to pull the full credit report.</div>
+    <div id="report" hidden></div>
+  </div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function showMsg(cls, t) { const m = $("#msg"); m.className = "msg show " + cls; m.textContent = t; }
+function hideMsg() { $("#msg").className = "msg"; }
+
+function fmtDT(iso) { if (!iso) return "—"; const d = new Date(iso);
+  return isNaN(d) ? String(iso).slice(0,16).replace("T"," ") : d.toLocaleString(undefined,{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit"}); }
+function fmtDay(iso) { if (!iso) return "—"; const d = new Date(iso);
+  return isNaN(d) ? String(iso).slice(0,10) : d.toLocaleDateString(undefined,{day:"2-digit",month:"short",year:"numeric"}); }
+function pill(s) { const v = String(s || ""); const cls = /complete/i.test(v) ? "pill-green" : /disburs|approved/i.test(v) ? "pill-amber"
+  : /reject|blacklist|overdue|late/i.test(v) ? "pill-red" : "pill-grey"; return "<span class='pill-s " + cls + "'>" + esc(v || "—") + "</span>"; }
+function money(v) { return (v === null || v === undefined || v === "" || v === 0) ? "—" : esc(String(v)); }
+// Who disbursed a loan: the named admin login (e.g. "Jacky Zhiling") when there is one, otherwise
+// the platform/channel code (FG/TN/DM...) shown as a muted tag. Never just the "IO" identifier.
+function disburser(l) {
+  if (l.admin) return "<b>" + esc(l.admin) + "</b>";
+  if (l.platform) return "<span class='pill-s pill-grey'>" + esc(l.platform) + " (channel)</span>";
+  return "—";
+}
+
+function bigTable(rows, headers, rowFn, pageSize) {
+  let shown = pageSize; const wrap = document.createElement("div");
+  const render = () => {
+    wrap.innerHTML = "<div class='rp-scroll'><table><tbody><tr>" + headers.map(h => "<th>" + esc(h) + "</th>").join("") + "</tr>" +
+      rows.slice(0, shown).map(rowFn).join("") + "</tbody></table></div>" +
+      (shown < rows.length ? "<div class='rp-more'><button class='ghost' data-more>Show more (" + (rows.length - shown) + " left)</button></div>" : "");
+    const b = wrap.querySelector("[data-more]"); if (b) b.onclick = () => { shown += 100; render(); };
+  };
+  render(); return wrap;
+}
+
+function renderReport(r) {
+  $("#empty").hidden = true;
+  const c = r.customer || {}, sig = r.signals || {}, m = r.member || {};
+  const overdue = +(sig.cardOverdueDays || c.active_overdue_days || 0);
+  const bl = +(c.blacklist_count || 0);
+  const flags = [];
+  if (bl > 0) flags.push("Blacklisted on " + bl + " profile" + (bl > 1 ? "s" : ""));
+  if (overdue > 0) flags.push("Currently " + overdue + " days overdue");
+  if (c.late_penalty_rejected) flags.push(c.late_penalty_rejected + " late-penalty rejection" + (c.late_penalty_rejected > 1 ? "s" : ""));
+  const cards = [
+    { l: "Total disbursed", v: sig.totalDisbursed ?? "—" },
+    { l: "Total completed", v: sig.totalCompleted ?? "—" },
+    { l: "Blacklists", v: bl, bad: bl > 0 },
+    { l: "Overdue days", v: overdue, bad: overdue > 0 },
+    { l: "Loan today", v: sig.todayCount ?? "0", bad: +(sig.todayCount || 0) > 0 },
+    { l: "Avg period (d)", v: sig.period || "—" },
+  ];
+  const el = $("#report");
+  el.innerHTML =
+    (flags.length ? "<div class='rp-flag'>⚠ Red flags: " + esc(flags.join(" · ")) + ".</div>" : "") +
+    "<div class='rp-name'>" + esc(r.name || c.name || r.ic) + "</div>" +
+    "<div class='rp-sub'>Full history across every admin in the pyramid." + (r.source === "ui" ? " · <span class='pill-s pill-grey'>UI workflow" + (r.uiMs ? " · " + (r.uiMs / 1000).toFixed(1) + " s" : "") + "</span>" : "") + "</div>" +
+    "<div class='rp-cards'>" + cards.map(k => "<div class='rp-card" + (k.bad ? " bad" : "") + "'><div class='v'>" + esc(String(k.v)) + "</div><div class='l'>" + esc(k.l) + "</div></div>").join("") + "</div>" +
+    "<div class='rp-meta'>" +
+      "<span>IC <b>" + esc(r.ic) + "</b></span>" +
+      "<span>Phone <b>" + esc(r.phone || "—") + "</b></span>" +
+      "<span>DOB <b>" + esc(c.dob || "—") + "</b></span>" +
+      "<span>Loan amount <b>" + esc(m.loanAmountActual || "—") + "</b></span>" +
+      "<span>Tenure <b>" + (m.tenureDays != null && m.tenureDays !== "" ? esc(m.tenureDays + "d") : "—") + "</b></span>" +
+      "<span>Due date <b>" + esc(m.dueDate || "—") + "</b></span>" +
+      "<span>Last closed <b>" + fmtDay(c.closed_date) + "</b></span>" +
+      "<span>Email <b>" + esc(c.email || "—") + "</b></span>" +
+      "<span>Profiles <b>" + esc(c.profile_count ?? "—") + "</b></span>" +
+      "<span>Closed <b>" + esc(c.closed ?? "—") + "</b></span>" +
+      "<span>Disburse allowed <b>" + (c.disburse === true ? "Yes" : c.disburse === false ? "No" : "—") + "</b></span>" +
+      "<span>On-hand amount <b>" + esc(m.onHandAmount || "—") + "</b></span>" +
+      "<span>Loan created <b>" + esc(m.loanCreated || "—") + "</b></span>" +
+      "<span>Loan event <b>" + esc(m.loanEvent || "—") + "</b></span>" +
+      "<span>Recent 5 <b>" + esc((sig.recentDetail || []).map(o => o.days + "d/" + o.amt).join(", ") || "—") + "</b></span>" +
+    "</div>";
+  const loans = r.loans || [], txs = r.transactions || [];
+  let adminSel = null;
+  const ls = document.createElement("div"); ls.className = "rp-sec";
+  const ts = document.createElement("div"); ts.className = "rp-sec";
+  const loanCols = ["Created", "Disbursed by", "Repayment", "Status", "Overdue", "Completed late", "Remarks"];
+  const txCols = ["Date", "Type", "Credit", "Debit", "Admin", "Remarks"];
+  const loanRow = l =>
+    "<tr><td>" + fmtDT(l.created_on) + "</td><td>" + disburser(l) + "</td><td>" + pill(l.payment_status) + "</td><td>" + pill(l.loan_status) +
+    (l.rejection_reason_display ? "<div style='font-size:11px;color:var(--err)'>" + esc(l.rejection_reason_display) + "</div>" : "") +
+    "</td><td>" + (l.is_overdue ? "<span class='pill-s pill-red'>Yes</span>" : "—") + "</td><td>" + (l.completed_late ? "<span class='pill-s pill-red'>Late</span>" : "—") + "</td><td>" + esc(l.remark || "—") + "</td></tr>";
+  const txRow = t =>
+    "<tr><td>" + fmtDay(t.date) + "</td><td>" + pill(t.transaction_type) + "</td><td>" + money(t.credit) + "</td><td>" +
+    money(t.debit) + "</td><td>" + esc(t.admin || "—") + (t.admin_identifier ? " <span class='pill-s pill-grey'>" + esc(t.admin_identifier) + "</span>" : "") + "</td><td>" + esc(t.remark || "—") + "</td></tr>";
+  function drawTables() {
+    const lf = adminSel ? loans.filter(l => l.admin === adminSel) : loans;
+    const tf = adminSel ? txs.filter(t => t.admin === adminSel) : txs;
+    const tag = adminSel ? " <span class='pill-s pill-grey'>" + esc(adminSel) + "</span>" : "";
+    ls.innerHTML = "<h4>Loan details <span class='cnt'>" + lf.length + (adminSel ? " / " + loans.length : "") + "</span>" + tag + "</h4>";
+    ls.appendChild(lf.length ? bigTable(lf, loanCols, loanRow, 12) : Object.assign(document.createElement("div"), { className: "rp-empty", textContent: "No loans for this admin." }));
+    ts.innerHTML = "<h4>Transaction log <span class='cnt'>" + tf.length + (adminSel ? " / " + txs.length : "") + "</span>" + tag + "</h4>";
+    ts.appendChild(tf.length ? bigTable(tf, txCols, txRow, 12) : Object.assign(document.createElement("div"), { className: "rp-empty", textContent: "No transactions for this admin." }));
+  }
+  const admins = c.admins || [];
+  if (admins.length) {
+    const cnt = {};
+    admins.forEach(a => cnt[a] = 0);
+    loans.forEach(l => { if (l.admin) cnt[l.admin] = (cnt[l.admin] || 0) + 1; });
+    const names = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a] || a.localeCompare(b));
+    const as = document.createElement("div"); as.className = "rp-sec rp-admins";
+    as.innerHTML = "<h4>Admins <span class='cnt'>" + names.length + "</span></h4>" +
+      "<div class='tools'><select aria-label='Choose admin'></select>" +
+      "<span class='hint'>Pick an admin to filter the loans and transactions below.</span></div>";
+    const sel = as.querySelector("select");
+    sel.innerHTML = "<option value=''>All admins (" + names.length + ")</option>" +
+      names.map(n => "<option value=\"" + esc(n) + "\">" + esc(n) + " — " + cnt[n] + " loan" + (cnt[n] === 1 ? "" : "s") + "</option>").join("");
+    sel.onchange = () => { adminSel = sel.value || null; drawTables(); };
+    el.appendChild(as);
+  }
+  drawTables();
+  el.appendChild(ls);
+  el.appendChild(ts);
+  const blk = r.blacklist || [];
+  if (blk.length) {
+    const bs = document.createElement("div"); bs.className = "rp-sec";
+    bs.innerHTML = "<h4>Blacklist <span class='cnt'>" + blk.length + "</span></h4>";
+    bs.appendChild(bigTable(blk, ["Date", "Reason"], b =>
+      "<tr><td>" + fmtDT(b.date || b.created_on) + "</td><td>" + pill(b.reason || b.remark) + "</td></tr>", 20));
+    el.appendChild(bs);
+  }
+  el.hidden = false;
+}
+
+function themeNow() {
+  const t = document.documentElement.getAttribute("data-theme");
+  return t || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+function paintThemeBtn() { $("#theme").textContent = themeNow() === "dark" ? "☀ Light" : "🌙 Dark"; }
+$("#theme").onclick = () => {
+  const n = themeNow() === "dark" ? "light" : "dark";
+  document.documentElement.setAttribute("data-theme", n);
+  try { localStorage.setItem("theme", n); } catch (e) {}
+  paintThemeBtn();
+};
+paintThemeBtn();
+
+async function search() {
+  const ic = $("#ic").value.trim().replace(/\D/g, "");
+  if (ic.length < 9 || ic.length > 12) return showMsg("err", "Enter a 12-digit IC (dashes are fine).");
+  $("#go").disabled = true; $("#report").hidden = true;
+  showMsg("ok", "Loading credit report for " + ic + "…");
+  try {
+    const res = await fetch("/credit-report?ic=" + encodeURIComponent(ic));
+    let d = null; try { d = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error((d && d.error) || (res.status === 404 ? "Not found on KR883 (check the IC)." : "Request failed (" + res.status + ")"));
+    hideMsg(); renderReport(d);
+    history.replaceState(null, "", "/report?ic=" + ic);
+  } catch (e) { showMsg("err", e.message); }
+  finally { $("#go").disabled = false; }
+}
+$("#go").onclick = search;
+$("#ic").onkeydown = e => { if (e.key === "Enter") search(); };
+
+// Deep link: /report?ic=... auto-runs
+const q = new URLSearchParams(location.search).get("ic");
+if (q) { $("#ic").value = q; search(); }
+</script>
+</body>
+</html>
