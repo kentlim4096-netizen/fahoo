@@ -1,14 +1,15 @@
-# Keep ngrok on the normal Wi-Fi connection while everything else (KR883 etc.) stays on the VPN.
+# Keep ngrok, and git pushes/pulls to GitHub, on the normal Wi-Fi connection while everything else
+# (KR883 etc.) stays on the VPN.
 #
 #   .\tools\ngrok-bypass-vpn.ps1            add the routes (asks for Administrator via UAC)
 #   .\tools\ngrok-bypass-vpn.ps1 -Remove    delete them again
 #   .\tools\ngrok-bypass-vpn.ps1 -Install   also re-apply the instant Pritunl connects, and every
-#                                           5 min besides (ngrok's server IPs rotate) - silently,
+#                                           5 min besides (ngrok's/GitHub's IPs rotate) - silently,
 #                                           no console window, via ngrok-bypass-hidden.vbs
 #
 # The VPN (Pritunl/OpenVPN) captures ALL traffic with 0.0.0.0/1 + 128.0.0.0/1. This adds a /32 host
-# route for each ngrok server address via the Wi-Fi gateway, which is more specific than the VPN's
-# routes, so only ngrok's own connection leaves through Wi-Fi. Nothing else changes.
+# route for each address below via the Wi-Fi gateway, which is more specific than the VPN's routes,
+# so only these connections leave through Wi-Fi. Nothing else changes.
 param([switch]$Remove, [switch]$Install, [switch]$Elevated)
 
 $ErrorActionPreference = "Stop"
@@ -24,7 +25,9 @@ if (-not $isAdmin) {
 }
 
 $hosts = "connect.ngrok-agent.com", "tunnel.ngrok.com", "ap.tunnel.ngrok.com", "tunnel.ap.ngrok.com",
-         "ngrok-agent.com", "update.ngrok-agent.com", "dashboard.ngrok.com", "api.ngrok.com"
+         "ngrok-agent.com", "update.ngrok-agent.com", "dashboard.ngrok.com", "api.ngrok.com",
+         "github.com", "api.github.com", "codeload.github.com", "objects.githubusercontent.com",
+         "raw.githubusercontent.com"
 
 # The physical (non-VPN) default gateway.
 $def = Get-NetRoute -DestinationPrefix 0.0.0.0/0 |
