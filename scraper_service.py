@@ -109,8 +109,8 @@ STEALTH_ARGS = ["--disable-blink-features=AutomationControlled",
 KW_API_BASE = os.environ.get("KW388_API_BASE", "https://api.kw388.com").rstrip("/")
 # Human-like pacing: one candidate at a time, with a random pause of KW_HUMAN_DELAY_MIN..MAX seconds
 # between them (also used between Members-page scrape pages). 0 for both = no pause.
-KW_HUMAN_DELAY_MIN = float(os.environ.get("KW_HUMAN_DELAY_MIN", 3))
-KW_HUMAN_DELAY_MAX = float(os.environ.get("KW_HUMAN_DELAY_MAX", 5))
+KW_HUMAN_DELAY_MIN = float(os.environ.get("KW_HUMAN_DELAY_MIN", 0))
+KW_HUMAN_DELAY_MAX = float(os.environ.get("KW_HUMAN_DELAY_MAX", 0))
 
 # ---- Credit-report provider mode -------------------------------------------------------------
 #   CREDIT_REPORT_MODE=ui  (default) genuine Playwright workflow in ONE persistent dedicated profile:

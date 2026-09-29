@@ -21,7 +21,7 @@ UI-mode rules
   * The credit report is the JSON response of the request the page itself makes when the
     "Credit report" menu item is clicked - not a separate API call.
 """
-import asyncio, os, re, time, uuid
+import asyncio, os, random, re, time, uuid
 
 STEALTH_ARGS = ["--disable-blink-features=AutomationControlled", "--exclude-switches=enable-automation"]
 MANUAL_REAUTH_REQUIRED = "MANUAL_REAUTH_REQUIRED"
@@ -116,6 +116,22 @@ class UiCreditReportProvider(CreditReportProvider):
         self.account = None                    # who is logged in (username / position / the two permissions we need)
         self._lock = asyncio.Lock()            # one lookup at a time on the single page
         self._start_lock = asyncio.Lock()      # start() is never run twice at once
+
+    # ------------------------------------------------------------ pacing
+    @staticmethod
+    def _split_pause_budget(total, n):
+        """Split `total` seconds into `n` random positive pieces that sum to it (random cut
+        points), so one candidate's whole lookup takes ~total seconds spread unevenly across its
+        actions - not each action taking that long on its own."""
+        cuts = sorted(random.uniform(0, total) for _ in range(n - 1))
+        edges = [0.0] + cuts + [total]
+        return [edges[i + 1] - edges[i] for i in range(n)]
+
+    async def _human_pause(self, secs):
+        """One slice of the per-candidate pause budget, spent before a UI action (type IC, click
+        Apply, click Actions, click Credit report, close popup) so the flow is paced like a person
+        clicking through the page rather than scripted back-to-back calls."""
+        await asyncio.sleep(secs)
 
     # ------------------------------------------------------------ lifecycle
     async def start(self):
@@ -380,12 +396,18 @@ class UiCreditReportProvider(CreditReportProvider):
             await self._open_member_list()
         tr.ok("member_list", "on Member List, filter ready")
 
+        # Whole lookup (type IC -> Apply -> Actions -> Credit report -> close) is paced to a
+        # randomized 4-7s total, split unevenly across its 5 actions - not 4-7s per action.
+        pause = self._split_pause_budget(random.uniform(4, 7), 5)
+
         # 1. IC filter -> Apply -> Member List response
         ts = time.perf_counter()
+        await self._human_pause(pause[0])
         box = p.locator("#filter-fields-region label.filter-field", has_text=re.compile(r"^\s*IC\s*$")).locator("input").first
         await box.fill("")
         await box.fill(dash(digits))
         tr.ok("search", "IC typed in the Member List IC filter")
+        await self._human_pause(pause[1])
         async with p.expect_response(lambda r: "/api/members/" in r.url and f"ic={digits}" in r.url, timeout=25000) as mi:
             await p.locator("#filter-fields-region .filter-actions button", has_text="Apply").click()
         mresp = await mi.value
@@ -419,6 +441,7 @@ class UiCreditReportProvider(CreditReportProvider):
         tr.ok("member_found", "member row visible in the table")
 
         tp = time.perf_counter()
+        await self._human_pause(pause[2])
         await row.locator("button.row-action").click()
         item = p.locator(".q-menu .act-menu button.act-item", has_text="Credit report").first
         try:
@@ -430,6 +453,7 @@ class UiCreditReportProvider(CreditReportProvider):
         tr.ok("actions_clicked", "row Actions (3-dot) clicked, menu shows 'Credit report'")
 
         # 3. Credit report -> the request the PAGE makes -> popup
+        await self._human_pause(pause[3])
         async with p.expect_response(lambda r: "/api/loans/credit-report/" in r.url and digits in r.url, timeout=25000) as ci:
             await item.click()
         cr = await ci.value
@@ -455,6 +479,7 @@ class UiCreditReportProvider(CreditReportProvider):
             raise RuntimeError("report loaded by the popup has no customer_details")
         tr.ok("extracted", f"loans={len(report.get('loan_details') or [])} transactions={len(report.get('transaction_log') or [])}")
 
+        await self._human_pause(pause[4])
         await p.keyboard.press("Escape")
         await p.locator(".q-dialog.fullscreen").first.wait_for(state="detached", timeout=8000)
         tr.ok("popup_closed")
