@@ -2,7 +2,9 @@
 #
 #   .\tools\ngrok-bypass-vpn.ps1            add the routes (asks for Administrator via UAC)
 #   .\tools\ngrok-bypass-vpn.ps1 -Remove    delete them again
-#   .\tools\ngrok-bypass-vpn.ps1 -Install   also re-apply every 5 min (ngrok's server IPs rotate)
+#   .\tools\ngrok-bypass-vpn.ps1 -Install   also re-apply the instant Pritunl connects, and every
+#                                           5 min besides (ngrok's server IPs rotate) - silently,
+#                                           no console window, via ngrok-bypass-hidden.vbs
 #
 # The VPN (Pritunl/OpenVPN) captures ALL traffic with 0.0.0.0/1 + 128.0.0.0/1. This adds a /32 host
 # route for each ngrok server address via the Wi-Fi gateway, which is more specific than the VPN's
@@ -63,9 +65,29 @@ foreach ($ip in $ips) {
 $known | Sort-Object -Unique | Set-Content $stateFile
 
 if ($Install) {
-    $act = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$self`" -Elevated"
-    $trg = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
-    Register-ScheduledTask -TaskName "NgrokBypassVpn" -Action $act -Trigger $trg -RunLevel Highest -Force | Out-Null
-    Write-Host "Scheduled task NgrokBypassVpn installed (re-applies every 5 minutes)."
+    $vbs = Join-Path (Split-Path $self) "ngrok-bypass-hidden.vbs"
+    $act = New-ScheduledTaskAction -Execute "wscript.exe" -Argument "`"$vbs`""
+
+    # Backup timer - ngrok's server IPs rotate occasionally, independent of the VPN connecting.
+    $timerTrg = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 5)
+
+    # Instant trigger - fires the moment Windows logs Pritunl's adapter coming up, so the bypass
+    # re-applies within about a second of connecting instead of waiting for the next timer tick.
+    $eventClass = Get-CimClass -Namespace "Root/Microsoft/Windows/TaskScheduler" -ClassName "MSFT_TaskEventTrigger"
+    $eventTrg = New-CimInstance -CimClass $eventClass -ClientOnly
+    # The event log's XPath dialect has no contains()/string functions - only exact predicates -
+    # so each Pritunl adapter slot (1-3, matching the TAP adapters this machine has) is matched
+    # by name explicitly rather than a prefix match.
+    $eventTrg.Subscription = @'
+<QueryList><Query Id="0" Path="Microsoft-Windows-NetworkProfile/Operational">
+<Select Path="Microsoft-Windows-NetworkProfile/Operational">*[System[Provider[@Name='Microsoft-Windows-NetworkProfile'] and EventID=10000]] and *[EventData[Data[@Name='Description']='Pritunl 1' or Data[@Name='Description']='Pritunl 2' or Data[@Name='Description']='Pritunl 3']]</Select>
+</Query></QueryList>
+'@
+    $eventTrg.Enabled = $true
+
+    $settings = New-ScheduledTaskSettingsSet -Hidden -MultipleInstances IgnoreNew
+    Register-ScheduledTask -TaskName "NgrokBypassVpn" -Action $act -Trigger $timerTrg, $eventTrg `
+        -Settings $settings -RunLevel Highest -Force | Out-Null
+    Write-Host "Scheduled task NgrokBypassVpn installed - fires instantly when Pritunl connects, and every 5 min as backup. Runs hidden."
 }
 Write-Host "Done. Restart ngrok so it reconnects over Wi-Fi."
