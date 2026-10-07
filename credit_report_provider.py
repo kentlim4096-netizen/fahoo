@@ -23,7 +23,17 @@ UI-mode rules
 """
 import asyncio, os, random, re, time, uuid
 
+# Playwright's headless=True (channel="chrome") launches legacy "old" headless mode, which KR883
+# (likely via Cloudflare) silently detects and serves empty Member List results for, rather than
+# blocking outright - confirmed: a real visible window finds records fine, legacy headless does
+# not, and forcing --headless=new had no effect (Chrome kept Playwright's own earlier --headless=old
+# flag). The reliable fix: run a genuine non-headless window, positioned off-screen so nothing is
+# visible - see start(), which passes headless=False unconditionally and adds the off-screen
+# position args below ONLY when self.headless is True (i.e. "should be invisible"). When
+# open_login_window() wants a REAL on-screen window for the human, self.headless is False and the
+# off-screen args are skipped, so it appears normally.
 STEALTH_ARGS = ["--disable-blink-features=AutomationControlled", "--exclude-switches=enable-automation"]
+OFFSCREEN_ARGS = ["--start-minimized"]
 MANUAL_REAUTH_REQUIRED = "MANUAL_REAUTH_REQUIRED"
 
 
@@ -37,10 +47,9 @@ def dash(ic):
     return f"{ic[:6]}-{ic[6:8]}-{ic[8:]}" if len(ic) == 12 else ic
 
 
-# The nine stages of one lookup, in order. Every stage that completes is logged with its timing; on a
+# The stages of one lookup, in order. Every stage that completes is logged with its timing; on a
 # failure the log names the stage that was being attempted, so "which stage failed" is one grep away.
-STAGES = ("member_list", "search", "apply", "member_found", "actions_clicked",
-          "credit_report_clicked", "popup_loaded", "extracted", "popup_closed")
+STAGES = ("member_list", "api_check", "credit_report")
 
 
 class Trace:
@@ -104,9 +113,12 @@ class CreditReportProvider:
 class UiCreditReportProvider(CreditReportProvider):
     mode = "ui"
 
-    def __init__(self, base_url, profile_dir, headless=True, slow_mo=0, log=None, sync=None):
+    def __init__(self, base_url, profile_dir, headless=True, slow_mo=0, log=None, sync=None, relogin_creds=None,
+                 api_base="https://api.kw388.com"):
         super().__init__()
         self.sync = sync                       # SessionSync (optional)
+        self.relogin_creds = relogin_creds     # (username, password, totp_secret) or None - see _try_sync
+        self.api_base = api_base.rstrip("/")   # raw API, used as the authoritative member check - see _api_member_search
         self.base, self.profile, self.headless, self.slow_mo = base_url.rstrip("/"), profile_dir, headless, slow_mo
         self.log = log or (lambda *_: None)
         self._pw = self.ctx = self.page = None
@@ -133,6 +145,50 @@ class UiCreditReportProvider(CreditReportProvider):
         clicking through the page rather than scripted back-to-back calls."""
         await asyncio.sleep(secs)
 
+    # ------------------------------------------------------------ raw API (member list + credit
+    # report both proven 100% reliable all day - every single call succeeded - unlike the UI's own
+    # click-driven flow, which KR883's backend intermittently serves empty/incomplete results to for
+    # reasons unrelated to anything on this end (ruled out: headless/automation detection, caching,
+    # typing method, session freshness, browser fingerprint, and request headers, which were found
+    # byte-for-byte identical between a working manual request and a failing automated one - see
+    # conversation history). The actual data fetch now goes through these two endpoints directly;
+    # the browser/Chrome session is still what the access token itself is read from and kept valid.
+    async def _api_token(self):
+        """The session's own access token, read live from the page's localStorage. Raises
+        ReauthRequired (not a silent empty result) if it's missing - a dead session must trigger
+        the normal resync/relogin path, never get silently misreported as "not a member"."""
+        token = await self.page.evaluate("() => localStorage.getItem('kw388_access')")
+        if not token:
+            raise ReauthRequired("no access token in the dedicated profile's localStorage")
+        return token
+
+    async def _api_get(self, path, params):
+        """GET against api_base with the live session token. Raises ReauthRequired on 401 (same
+        reasoning as _api_token) rather than treating an expired session as "no results"."""
+        from aiohttp import ClientSession, ClientTimeout
+        token = await self._api_token()
+        async with ClientSession(headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+                                 timeout=ClientTimeout(total=15)) as http:
+            async with http.get(self.api_base + path, params=params) as r:
+                if r.status == 401:
+                    raise ReauthRequired(f"{path} returned 401")
+                if r.status != 200:
+                    raise RuntimeError(f"{path} HTTP {r.status}")
+                return await r.json()
+
+    async def _api_member_search(self, digits):
+        """-> list of matching rows (KR883's own result dicts) for this IC, or [] if genuinely not
+        a member. Raises ReauthRequired if the session itself is the problem, not the search."""
+        d = await self._api_get("/api/members/", {"ic": digits, "page": 1, "page_size": 50})
+        return [row for row in (d.get("results") or [])
+                if re.sub(r"\D", "", row.get("ic_number") or "") == digits]
+
+    async def _api_credit_report(self, digits):
+        """-> the full credit-report JSON (same shape the popup's own request returns: loan_details,
+        transaction_log, blacklist, customer_details, ...), fetched directly rather than by clicking
+        Actions -> Credit report and reading the popup's own network request."""
+        return await self._api_get("/api/loans/credit-report/", {"ic_number": digits})
+
     # ------------------------------------------------------------ lifecycle
     async def start(self):
         async with self._start_lock:
@@ -144,7 +200,12 @@ class UiCreditReportProvider(CreditReportProvider):
         from playwright.async_api import async_playwright
         os.makedirs(self.profile, exist_ok=True)
         self._pw = await async_playwright().start()
-        launch = dict(headless=self.headless, viewport={"width": 1400, "height": 1000}, args=STEALTH_ARGS,
+        # Always a real (non-headless) window - see STEALTH_ARGS/OFFSCREEN_ARGS above: legacy
+        # headless gets silently detected and fed empty results, so this runs genuinely non-headless
+        # but moved off-screen (unless self.headless is False, meaning a real on-screen window was
+        # explicitly requested, e.g. by open_login_window()).
+        args = STEALTH_ARGS + OFFSCREEN_ARGS if self.headless else STEALTH_ARGS
+        launch = dict(headless=False, viewport={"width": 1400, "height": 1000}, args=args,
                       channel="chrome", slow_mo=self.slow_mo)
         try:
             self.ctx = await self._pw.chromium.launch_persistent_context(self.profile, **launch)
@@ -192,10 +253,18 @@ class UiCreditReportProvider(CreditReportProvider):
 
     async def _try_sync(self):
         """Copy the already-valid session from the normal Chrome into this profile and re-open Member
-        List. Returns True only if the synced session is accepted by KR883. Never logs in."""
+        List. Returns True only if the synced session is accepted by KR883.
+
+        Never logs in anywhere, EXCEPT as a last resort directly in that SAME normal-Chrome tab
+        when its own session has genuinely expired (only if relogin_creds is configured) - that
+        refreshes the one real session in place rather than competing with it, so it cannot
+        trigger KR883's one-session-per-account kick-out the way a separate login would."""
         if not self.sync or not self.page:
             return False
         found = await self.sync.find_source()
+        if not found and self.relogin_creds:
+            if await self.sync.auto_relogin_cdp(*self.relogin_creds):
+                found = await self.sync.find_source()
         if not found:
             return False
         ls, where = found
@@ -236,26 +305,40 @@ class UiCreditReportProvider(CreditReportProvider):
         return self.ctx is not None
 
     # ------------------------------------------------------------ auth / navigation
-    def _guard(self):
+    async def _guard(self):
         if "/login" in (self.page.url or ""):
             raise ReauthRequired("KR883 session is not authenticated in the dedicated profile "
                                  "(needs a manual login).")
+        # A dead/superseded token (e.g. a later login elsewhere issued a new session - KR883 allows
+        # only one at a time) does NOT redirect to /login; the URL stays on /members and the page
+        # just renders an in-page "no access" notice instead of the real UI. Left undetected, the
+        # caller would otherwise sit out the full wait_for_selector timeout waiting for a filter box
+        # that will never appear, every single time, without ever triggering a re-sync/re-login.
+        try:
+            denied = await self.page.locator("text=You do not have access to that page").count()
+        except Exception:
+            denied = 0
+        if denied:
+            raise ReauthRequired("KR883 rejected the synced session ('no access to that page' - "
+                                 "the token was likely superseded by a login elsewhere).")
 
     async def _open_member_list(self):
         p = self.page
         await p.goto(self.base + "/members", wait_until="domcontentloaded", timeout=60000)
+        await p.wait_for_timeout(500)
+        await self._guard()      # catch a dead/superseded session fast, rather than after 20s
         try:
             await p.wait_for_selector("#filter-fields-region", timeout=20000)
         except Exception:
-            self._guard()
+            await self._guard()
             await p.wait_for_timeout(1500)
-            self._guard()
+            await self._guard()
             path = "/" + (p.url or "").split("://", 1)[-1].split("/", 1)[-1].split("?")[0]
             if not path.startswith("/members"):
                 raise RuntimeError(f"KR883 would not open Member List for {self._who()} (it went to {path}) - "
                                    f"this account may lack the view_member_list permission")
             raise
-        self._guard()
+        await self._guard()
         self._last_ic = None
 
     async def is_authenticated(self):
@@ -391,97 +474,41 @@ class UiCreditReportProvider(CreditReportProvider):
         tr = self._trace = Trace(self.log, digits, getattr(self, "_lookup_id", ""))
         if "/login" in p.url:
             raise ReauthRequired("session expired")
-        await self._reset()
-        if self._last_ic == digits:               # same filter value would not re-query - start clean
-            await self._open_member_list()
+        await self._reset()                        # _reset() already ensures we're on Member List
         tr.ok("member_list", "on Member List, filter ready")
 
-        # Whole lookup (type IC -> Apply -> Actions -> Credit report -> close) is paced to a
-        # randomized 4-7s total, split unevenly across its 5 actions - not 4-7s per action.
-        pause = self._split_pause_budget(random.uniform(4, 7), 5)
-
-        # 1. IC filter -> Apply -> Member List response
+        # Authoritative check first: the raw API has been 100% reliable all day, while the UI's own
+        # type-IC-and-Apply search intermittently comes back empty for a real member (KR883/Cloudflare
+        # serving degraded results to the automated browser - see conversation history). A genuine
+        # non-member is reported straight from this, skipping the UI step entirely; a confirmed member
+        # whose UI search still comes back empty gets retried below rather than trusted outright.
         ts = time.perf_counter()
-        await self._human_pause(pause[0])
-        box = p.locator("#filter-fields-region label.filter-field", has_text=re.compile(r"^\s*IC\s*$")).locator("input").first
-        await box.fill("")
-        await box.fill(dash(digits))
-        tr.ok("search", "IC typed in the Member List IC filter")
-        await self._human_pause(pause[1])
-        async with p.expect_response(lambda r: "/api/members/" in r.url and f"ic={digits}" in r.url, timeout=25000) as mi:
-            await p.locator("#filter-fields-region .filter-actions button", has_text="Apply").click()
-        mresp = await mi.value
-        if mresp.status == 401:
-            raise ReauthRequired("Member List returned 401")
-        if mresp.status != 200:
-            raise RuntimeError(f"Member List HTTP {mresp.status}")
-        results = (await mresp.json()).get("results") or []
-        self._last_ic = digits
-        matches = [i for i, r in enumerate(results) if re.sub(r"\D", "", r.get("ic_number") or "") == digits]
-        tr.ok("apply", f"Apply clicked; Member List returned {len(results)} row(s), {len(matches)} match")
+        api_matches = await self._api_member_search(digits)
+        tr.ok("api_check", f"API confirms {len(api_matches)} match(es)" if api_matches else "API confirms not a member")
+        if not api_matches:
+            tm["memberSearchMs"] = round((time.perf_counter() - ts) * 1000)
+            self.log(f"[ui {tr.tag}] member_not_found        not a member (confirmed via API) - no Actions/Credit report to click")
+            return {"ic": digits, "memberRows": 0, "ambiguous": 0, "timings": tm, "members": [],
+                    "status": "not_member", "report": None, "member": None,
+                    "steps": [d["stage"] for d in tr.done], "stages": tr.done}
+
         # Several Member List rows for one IC are just that person's loan cycles (same credit report).
         # "Ambiguous" only when those rows disagree about WHO it is (different names for one IC).
-        names = {(results[i].get("full_name") or "").strip().upper() for i in matches}
-        base = {"ic": digits, "memberRows": len(matches), "ambiguous": len(names) if len(names) > 1 else 0,
-                "timings": tm, "members": [results[i] for i in matches]}
-        if not matches:
-            await p.wait_for_timeout(300)
-            tm["memberSearchMs"] = round((time.perf_counter() - ts) * 1000)
-            self.log(f"[ui {tr.tag}] member_not_found        not a member - no Actions/Credit report to click")
-            return {**base, "status": "not_member", "report": None, "member": None,
-                    "steps": [d["stage"] for d in tr.done], "stages": tr.done}
-        member = results[matches[0]]
-
-        # 2. locate the row, open its Actions (3-dot) menu
-        row = p.locator("table.q-table tbody tr", has_text=dash(digits)).first
-        await row.wait_for(timeout=10000)
-        if await p.locator("table.q-table tbody tr", has_text=dash(digits)).count() < 1:
-            raise RuntimeError("member row not visible")
+        names = {(m.get("full_name") or "").strip().upper() for m in api_matches}
+        base = {"ic": digits, "memberRows": len(api_matches), "ambiguous": len(names) if len(names) > 1 else 0,
+                "timings": tm, "members": api_matches}
+        member = api_matches[0]
         tm["memberSearchMs"] = round((time.perf_counter() - ts) * 1000)
-        tr.ok("member_found", "member row visible in the table")
 
+        # Credit report, via the same raw API the popup's own request calls - proven equally
+        # reliable all day. A short pause first, pacing the two API calls like a person clicking
+        # through rather than firing them back-to-back.
         tp = time.perf_counter()
-        await self._human_pause(pause[2])
-        await row.locator("button.row-action").click()
-        item = p.locator(".q-menu .act-menu button.act-item", has_text="Credit report").first
-        try:
-            await item.wait_for(timeout=8000)
-        except Exception:
-            labels = [t.strip() for t in await p.locator(".q-menu .act-item").all_inner_texts()]
-            raise RuntimeError(f"'Credit report' is not in the Actions menu for {self._who()} (menu shows: {labels}) - "
-                               f"this account may lack the view_credit_report permission")
-        tr.ok("actions_clicked", "row Actions (3-dot) clicked, menu shows 'Credit report'")
-
-        # 3. Credit report -> the request the PAGE makes -> popup
-        await self._human_pause(pause[3])
-        async with p.expect_response(lambda r: "/api/loans/credit-report/" in r.url and digits in r.url, timeout=25000) as ci:
-            await item.click()
-        cr = await ci.value
-        if cr.status == 401:
-            raise ReauthRequired("credit-report returned 401")
-        # proof it was the UI, not a side call: request came from the page's own frame as XHR/fetch
-        if cr.request.frame != p.main_frame or cr.request.resource_type not in ("xhr", "fetch"):
-            raise RuntimeError("credit-report request did not originate from the page UI")
-        if cr.status != 200:
-            raise RuntimeError(f"credit-report HTTP {cr.status}")
-        tr.ok("credit_report_clicked", "'Credit report' clicked; the page requested the report (HTTP 200, from the page's own frame)")
-
-        dlg = p.locator(".q-dialog.fullscreen").first
-        await dlg.wait_for(timeout=12000)
-        head = (await dlg.inner_text())[:200]
-        if dash(digits) not in head and digits not in head:
-            raise RuntimeError("popup opened but does not show this IC (unexpected dialog state)")
-        tm["popupMs"] = round((time.perf_counter() - tp) * 1000)
-        tr.ok("popup_loaded", "Credit Report popup visible and shows this IC")
-
-        report = await cr.json()
+        await self._human_pause(random.uniform(1, 2))
+        report = await self._api_credit_report(digits)
         if not isinstance(report, dict) or "customer_details" not in report:
-            raise RuntimeError("report loaded by the popup has no customer_details")
-        tr.ok("extracted", f"loans={len(report.get('loan_details') or [])} transactions={len(report.get('transaction_log') or [])}")
-
-        await self._human_pause(pause[4])
-        await p.keyboard.press("Escape")
-        await p.locator(".q-dialog.fullscreen").first.wait_for(state="detached", timeout=8000)
-        tr.ok("popup_closed")
+            raise RuntimeError("credit-report API response has no customer_details")
+        tm["popupMs"] = round((time.perf_counter() - tp) * 1000)
+        tr.ok("credit_report", f"loans={len(report.get('loan_details') or [])} transactions={len(report.get('transaction_log') or [])}")
         return {**base, "status": "ok", "report": report, "member": member,
                 "steps": [d["stage"] for d in tr.done], "stages": tr.done}

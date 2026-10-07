@@ -19,10 +19,20 @@ its own refreshing).
 Security: tokens are never printed or logged; nothing is hard-coded; a source is only used if the
 KR883 server itself accepts its access token.
 """
-import asyncio, base64, glob, json, os, re, time
+import asyncio, base64, glob, hashlib, hmac, json, os, re, struct, time
 
 KEYS_COPIED = ("kw388_access", "kw388_profile")     # refresh token intentionally excluded
 KEYS_READ = ("kw388_access", "kw388_refresh", "kw388_profile")
+
+
+def _totp_now(secret, digits=6, period=30, algo="sha1"):
+    """-> (code, seconds left in this window). Same sha1/6/30 TOTP KR883 itself uses."""
+    key = base64.b32decode(secret + "=" * ((8 - len(secret) % 8) % 8))
+    counter = int(time.time() // period)
+    h = hmac.new(key, struct.pack(">Q", counter), getattr(hashlib, algo, hashlib.sha1)).digest()
+    o = h[-1] & 0x0F
+    code = (struct.unpack(">I", h[o:o + 4])[0] & 0x7FFFFFFF) % (10 ** digits)
+    return str(code).zfill(digits), period - int(time.time() % period)
 
 
 def jwt_claims(tok):
@@ -53,26 +63,152 @@ class SessionSync:
     # ---------------------------------------------------------------- sources (read-only)
     async def read_from_chrome_live(self):
         """localStorage of an already-open KR883 tab in the normal Chrome. Read-only: a single
-        localStorage read; no navigation, no clicks, no new tabs."""
+        localStorage read; no navigation, no clicks, no new tabs.
+
+        Talks raw CDP (the debug port's own HTTP + WebSocket protocol) instead of going through
+        Playwright's page discovery: Playwright's connect_over_cdp builds its page list from
+        browser-context auto-attach events, which can silently miss a tab that was already open
+        before it connected (observed on this exact tab - /json/list sees it fine, Playwright's
+        ctx.pages does not). Raw CDP sees every target /json/list reports, regardless."""
+        from aiohttp import ClientSession, ClientTimeout
         try:
-            from playwright.async_api import async_playwright
-            async with async_playwright() as p:
-                b = await p.chromium.connect_over_cdp(self.cdp_url, timeout=4000)
-                try:
-                    for ctx in b.contexts:
-                        for pg in ctx.pages:
-                            if "kr883" not in pg.url or "/login" in pg.url:
-                                continue
-                            ls = await pg.evaluate(
-                                "(keys) => Object.fromEntries(keys.map(k => [k, localStorage.getItem(k)]).filter(([k, v]) => v))",
-                                list(KEYS_READ))
-                            if ls.get("kw388_access"):
-                                return ls
-                finally:
-                    await b.close()          # disconnect only; the browser keeps running
+            async with ClientSession(timeout=ClientTimeout(total=4)) as s:
+                async with s.get(self.cdp_url.rstrip("/") + "/json/list") as r:
+                    targets = await r.json()
         except Exception as e:
             self.log(f"[sync] live read unavailable: {type(e).__name__}")
+            return None
+        candidates = [t for t in targets if t.get("type") == "page"
+                      and "kr883" in t.get("url", "") and "/login" not in t.get("url", "")
+                      and t.get("webSocketDebuggerUrl")]
+        expr = ("JSON.stringify(Object.fromEntries(%s.map(k => [k, localStorage.getItem(k)])"
+                ".filter(([k, v]) => v)))") % json.dumps(list(KEYS_READ))
+        for t in candidates:
+            try:
+                async with ClientSession(timeout=ClientTimeout(total=4)) as s:
+                    async with s.ws_connect(t["webSocketDebuggerUrl"]) as ws:
+                        await ws.send_json({"id": 1, "method": "Runtime.evaluate",
+                                            "params": {"expression": expr, "returnByValue": True}})
+                        async for msg in ws:
+                            data = json.loads(msg.data)
+                            if data.get("id") != 1:
+                                continue
+                            val = data.get("result", {}).get("result", {}).get("value")
+                            if val:
+                                ls = json.loads(val)
+                                if ls.get("kw388_access"):
+                                    return ls
+                            break
+            except Exception:
+                continue
         return None
+
+    # ---------------------------------------------------------------- genuine re-login
+    async def auto_relogin_cdp(self, username, password, totp_secret):
+        """When the worker's OWN Chrome session has genuinely logged out (not just unreadable),
+        finish signing back in on that SAME tab/profile - not a second, competing login elsewhere.
+        Because it refreshes the one real session in place (exactly what the worker would do by
+        hand), it cannot trigger KR883's one-session-per-account kick-out the way a separate login
+        would. Driven over raw CDP (Runtime.evaluate / Page.navigate), not Playwright - see
+        read_from_chrome_live for why Playwright's page discovery can't be trusted on this tab.
+        Credentials/secret are never logged."""
+        if not (username and password and totp_secret):
+            return False
+        from aiohttp import ClientSession, ClientTimeout
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=4)) as s:
+                async with s.get(self.cdp_url.rstrip("/") + "/json/list") as r:
+                    targets = await r.json()
+        except Exception as e:
+            self.log(f"[relogin] cannot reach Chrome debug port: {type(e).__name__}")
+            return False
+        t = next((x for x in targets if x.get("type") == "page" and "kr883" in x.get("url", "")
+                  and x.get("webSocketDebuggerUrl")), None)
+        if not t:
+            # Chrome is up but has no KR883 tab (e.g. it wasn't open when Chrome last closed) -
+            # open one, same as the worker opening a new tab themselves. Newer Chrome requires PUT
+            # for /json/new (a CSRF hardening change); older Chrome only accepts GET - try PUT first.
+            url = self.cdp_url.rstrip("/") + "/json/new?" + self.base + "/login"
+            try:
+                async with ClientSession(timeout=ClientTimeout(total=10)) as s:
+                    async with s.put(url) as r:
+                        if r.status == 405:
+                            async with s.get(url) as r2:
+                                t = await r2.json()
+                        else:
+                            t = await r.json()
+                self.log("[relogin] no KR883 tab was open - opened a new one")
+            except Exception as e:
+                self.log(f"[relogin] could not open a new tab: {type(e).__name__}")
+                return False
+        if not t or not t.get("webSocketDebuggerUrl"):
+            return False
+
+        counter = {"n": 0}
+
+        async def call(ws, method, params=None):
+            counter["n"] += 1
+            cid = counter["n"]
+            await ws.send_json({"id": cid, "method": method, "params": params or {}})
+            async for msg in ws:
+                data = json.loads(msg.data)
+                if data.get("id") == cid:
+                    return data.get("result", {})
+            return {}
+
+        async def ev(ws, expr):
+            r = await call(ws, "Runtime.evaluate", {"expression": expr, "returnByValue": True})
+            return r.get("result", {}).get("value")
+
+        set_val_js = (
+            "(function(sel, val) { const el = document.querySelector(sel); if (!el) return false; "
+            "const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set; "
+            "setter.call(el, val); el.dispatchEvent(new Event('input', {bubbles: true})); "
+            "el.dispatchEvent(new Event('change', {bubbles: true})); return true; })(%s, %s)")
+        click_js = (
+            "(function(label) { const b = Array.from(document.querySelectorAll('button')).find("
+            "x => x.textContent.trim().toLowerCase().includes(label) && !x.disabled); "
+            "if (b) { b.click(); return true; } return false; })(%s)")
+
+        try:
+            async with ClientSession(timeout=ClientTimeout(total=30)) as s:
+                async with s.ws_connect(t["webSocketDebuggerUrl"]) as ws:
+                    await call(ws, "Page.navigate", {"url": self.base + "/login"})
+                    await asyncio.sleep(1.8)
+                    url = await ev(ws, "location.href") or ""
+                    if "login" not in url:
+                        self.log("[relogin] already logged in once the page settled")
+                        return True
+
+                    await ev(ws, set_val_js % (json.dumps("input[type=text]"), json.dumps(username)))
+                    await ev(ws, set_val_js % (json.dumps("input[type=password]"), json.dumps(password)))
+                    if not await ev(ws, click_js % json.dumps("sign in")):
+                        await ev(ws, "document.querySelector('button[type=submit]')?.click()")
+                    await asyncio.sleep(2.5)
+                    url = await ev(ws, "location.href") or ""
+
+                    if "login" in url:          # 2FA step
+                        for _attempt in range(2):   # a code can straddle a 30s boundary
+                            code, left = _totp_now(totp_secret)
+                            if left < 4:
+                                await asyncio.sleep(left + 0.5)
+                                code, left = _totp_now(totp_secret)
+                            await ev(ws, set_val_js % (json.dumps("input[type=text]"), json.dumps(code)))
+                            await asyncio.sleep(0.5)
+                            for label in ("verify", "submit", "continue", "sign in"):
+                                if await ev(ws, click_js % json.dumps(label)):
+                                    break
+                            await asyncio.sleep(2.5)
+                            url = await ev(ws, "location.href") or ""
+                            if "login" not in url:
+                                break
+
+                    ok = "login" not in url
+                    self.log(f"[relogin] {'succeeded' if ok else 'failed'} on the same Chrome tab")
+                    return ok
+        except Exception as e:
+            self.log(f"[relogin] error: {type(e).__name__}: {str(e)[:120]}")
+            return False
 
     def read_from_chrome_disk(self):
         """Newest unexpired access token found in Chrome's on-disk localStorage files."""

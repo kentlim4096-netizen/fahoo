@@ -1591,8 +1591,13 @@ def get_session_sync():
 def get_ui_provider():
     global UI_PROVIDER
     if UI_PROVIDER is None:
+        # relogin_creds: only used as a last resort, directly in the SAME Chrome tab the session is
+        # mirrored from, when that tab's own KR883 session has genuinely expired - see _try_sync().
         UI_PROVIDER = UiCreditReportProvider(KW_BASE_URL, UI_PROFILE_DIR, headless=UI_HEADLESS, slow_mo=UI_SLOW_MO,
-                                             log=lambda m: print(m, file=sys.stderr), sync=get_session_sync())
+                                             log=lambda m: print(m, file=sys.stderr), sync=get_session_sync(),
+                                             relogin_creds=(KW_USER, KW_PASS, KW_TOTP_SECRET) if
+                                             (KW_USER and KW_PASS and KW_TOTP_SECRET) else None,
+                                             api_base=KW_API_BASE)
     return UI_PROVIDER
 
 

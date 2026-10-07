@@ -7,8 +7,9 @@ WHICH UI stages ran (via lookup_id in the provider's stage log) -> RESULT.
     2026-09-27 04:30:15.382 | /credit-report | worker | ***5533 | 127.0.0.1 | LOCAL | NOT_MEMBER | 0.7s | lookup_id=1a2b3c4d5e6f | stage=-
 
 NEVER written: the full IC (last 4 digits only), passwords, OTP/TOTP, tokens, cookies, the
-Authorization header, session contents. Forwarded-for headers are recorded only as sanitised,
-informational text - they are client-controlled and are never used for any security decision.
+Authorization header, session contents, or the visitor's IP address (forwarded-for headers are
+read only to classify the request as LOCAL/PROXIED/REMOTE - that classification is logged, the
+address itself is not).
 """
 import datetime, ipaddress, logging, logging.handlers, os, re, uuid
 
@@ -63,20 +64,18 @@ def source_info(request):
     return _ALLOWED_FWD.sub("", peer) or "?", kind, fwd
 
 
-def format_record(endpoint, role, ic, peer, kind, result, duration_s, lookup_id, stage=None, fwd="", when=None):
+def format_record(endpoint, role, ic, peer, kind, result, duration_s, lookup_id, stage=None, when=None):
     when = when or datetime.datetime.now()
     ts = when.strftime("%Y-%m-%d %H:%M:%S.") + "%03d" % (when.microsecond // 1000)
-    line = (f"{ts} | {endpoint} | {re.sub(r'[^a-z]', '', str(role).lower()) or '?'} | {mask_ic(ic)} | {peer} | {kind} | "
+    return (f"{ts} | {endpoint} | {re.sub(r'[^a-z]', '', str(role).lower()) or '?'} | {mask_ic(ic)} | {peer} | {kind} | "
             f"{result} | {duration_s:.1f}s | lookup_id={lookup_id} | stage={stage or '-'}")
-    if fwd:
-        line += f" | fwd={fwd}"
-    return line
 
 
 def write(logger, request, endpoint, role, ic, result, duration_s, lookup_id, stage=None):
-    """Never raises - auditing must not be able to break a lookup."""
+    """Never raises - auditing must not be able to break a lookup. The visitor's IP (forwarded-for)
+    is used only to classify LOCAL/PROXIED/REMOTE, never written to the log - see source_info()."""
     try:
-        peer, kind, fwd = source_info(request)
-        logger.info(format_record(endpoint, role, ic, peer, kind, result, duration_s, lookup_id, stage, fwd))
+        peer, kind, _fwd = source_info(request)
+        logger.info(format_record(endpoint, role, ic, peer, kind, result, duration_s, lookup_id, stage))
     except Exception:
         pass
