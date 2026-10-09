@@ -424,17 +424,28 @@ class UiCreditReportProvider(CreditReportProvider):
                     raise
                 except Exception as e:
                     timeout = "Timeout" in type(e).__name__ or "timeout" in str(e).lower()
+                    # The dedicated browser can die externally (crash, killed, idle-closer racing
+                    # this call) without going through close() - self.ctx then still points at a
+                    # dead object, "not self.ctx" stays False, and every retry just hits the same
+                    # closed target forever. Detect that and force a real restart instead of calling
+                    # _reset() (which would itself fail silently trying to use the dead page).
+                    closed = "closed" in str(e).lower() and ("target" in str(e).lower() or "context" in str(e).lower()
+                                                              or "browser" in str(e).lower())
                     tr = getattr(self, "_trace", None)
                     self.log(f"[ui lookup_id={self._lookup_id} ******{digits[-4:]}] FAILED at stage={tr.attempting() if tr else '?'} "
                              f"(attempt {attempt}): {type(e).__name__}: {str(e)[:100]}")
-                    try:
-                        await self._reset()
-                    except ReauthRequired:
-                        self.metrics.session_expired += 1
-                        self.metrics.lookups += 1
-                        raise
-                    except Exception:
-                        pass
+                    if closed:
+                        self.log(f"[ui lookup_id={self._lookup_id}] dedicated browser was closed externally - forcing a fresh start")
+                        self.ctx = self.page = self._pw = None
+                    else:
+                        try:
+                            await self._reset()
+                        except ReauthRequired:
+                            self.metrics.session_expired += 1
+                            self.metrics.lookups += 1
+                            raise
+                        except Exception:
+                            pass
                     if attempt == 1:
                         self.metrics.retries += 1
                         continue
