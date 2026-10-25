@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "KR883 Activity Logger",
+  "version": "1.0.0",
+  "description": "Records which customers are searched in the KR883 website on this computer, and the data returned, to a local Excel log.",
+  "host_permissions": [
+    "http://127.0.0.1:8780/*",
+    "https://*.ngrok.app/*",
+    "https://*.ngrok-free.app/*",
+    "https://*.ngrok-free.dev/*",
+    "https://*.ngrok.dev/*",
+    "https://*.ngrok.io/*"
+  ],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.kr883.com/*"
+      ],
+      "js": [
+        "inject.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.kr883.com/*"
+      ],
+      "js": [
+        "relay.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

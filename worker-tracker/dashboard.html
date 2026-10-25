@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Worker Dashboard</title>
+<style>
+  :root { --bg:#f4f6f9; --panel:#fff; --border:#e3e7ee; --text:#16181d; --muted:#6b7280; --accent:#4f46e5; --accent-fg:#fff;
+    --ok:#157f4b; --ok-bg:#e7f6ee; --warn:#8a5a00; --warn-bg:#fdf3dd; --err:#b42318; --err-bg:#fdeceb; --bar:#4f46e5; }
+  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg:#0f1115; --panel:#171a20; --border:#262b34; --text:#e8eaed;
+    --muted:#9aa3af; --accent:#6d5efc; --accent-fg:#0b1020; --ok:#6ee7a8; --ok-bg:#10291d; --warn:#f0c674; --warn-bg:#2e2413; --err:#ff9a92; --err-bg:#331714; --bar:#8b80ff; } }
+  :root[data-theme="dark"] { --bg:#0f1115; --panel:#171a20; --border:#262b34; --text:#e8eaed; --muted:#9aa3af; --accent:#6d5efc; --accent-fg:#0b1020;
+    --ok:#6ee7a8; --ok-bg:#10291d; --warn:#f0c674; --warn-bg:#2e2413; --err:#ff9a92; --err-bg:#331714; --bar:#8b80ff; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+  .topbar { position:sticky; top:0; z-index:5; background:var(--panel); border-bottom:1px solid var(--border); padding:12px 20px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+  .brand { font-weight:800; font-size:17px; letter-spacing:-0.02em; } .brand span { color:var(--accent); }
+  select, input[type=date], input[type=time], input[type=number] { background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:10px; padding:8px 11px; font:inherit; }
+  button { background:var(--accent); color:var(--accent-fg); border:0; border-radius:10px; padding:9px 16px; font:inherit; font-weight:700; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--text); border:1px solid var(--border); font-weight:600; }
+  a { color:var(--accent); } a.btn { text-decoration:none; }
+  .wrap { max-width:1200px; margin:0 auto; padding:22px 20px 80px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:18px; }
+  .card { border:1px solid var(--border); border-radius:14px; padding:16px 18px; background:var(--panel); }
+  .card .v { font-size:28px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.1; } .card .l { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-top:5px; }
+  .card .s { font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .sec { border:1px solid var(--border); border-radius:14px; margin-bottom:16px; overflow:hidden; background:var(--panel); }
+  .sec > h4 { margin:0; padding:12px 18px; font-size:14.5px; background:var(--bg); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:9px; }
+  .cnt { background:var(--border); color:var(--muted); border-radius:999px; padding:2px 10px; font-size:12.5px; font-weight:700; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; } @media (max-width:860px){ .two { grid-template-columns:1fr; } }
+  table { width:100%; border-collapse:collapse; font-size:13.5px; } th, td { text-align:left; padding:8px 14px; vertical-align:top; } th { color:var(--muted); font-weight:600; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; }
+  tr + tr { border-top:1px solid var(--border); } .scroll { max-height:340px; overflow:auto; } .scroll.tall { max-height:none; }
+  .empty { padding:22px; text-align:center; color:var(--muted); font-size:14px; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:999px; font-size:12.5px; font-weight:700; } .p-ok { background:var(--ok-bg); color:var(--ok); } .p-err { background:var(--err-bg); color:var(--err); } .p-warn { background:var(--warn-bg); color:var(--warn); } .p-grey { background:var(--border); color:var(--muted); }
+  .chart { display:grid; grid-template-columns:repeat(24,1fr); gap:4px; align-items:end; height:160px; padding:14px 16px 0; }
+  .col { display:flex; flex-direction:column; justify-content:flex-end; height:100%; } .bar { background:var(--bar); border-radius:4px 4px 0 0; } .col:hover .bar { filter:brightness(1.15); }
+  .axis { display:grid; grid-template-columns:repeat(24,1fr); gap:4px; padding:4px 16px 12px; font-size:10.5px; color:var(--muted); text-align:center; }
+  .legend { padding:0 18px 12px; font-size:12.5px; color:var(--muted); } .dot { display:inline-block; width:10px; height:10px; border-radius:3px; background:var(--bar); margin-right:5px; }
+  .mini { display:inline-block; height:8px; border-radius:4px; background:var(--bar); vertical-align:middle; margin-right:6px; }
+  .note { font-size:12.5px; color:var(--muted); padding:10px 18px; border-top:1px solid var(--border); }
+  td.mono { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .flags { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; }
+  /* settings */
+  #settings { position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; align-items:flex-start; justify-content:center; padding-top:70px; z-index:20; }
+  #settings.on { display:flex; } .panel { background:var(--panel); border:1px solid var(--border); border-radius:16px; width:min(520px,94vw); max-height:84vh; overflow:auto; padding:20px 22px; }
+  .panel h3 { margin:0 0 4px; } .panel .sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:9px 0; border-top:1px solid var(--border); } .row small { color:var(--muted); display:block; }
+  .sw { position:relative; width:46px; height:26px; flex:none; } .sw input { opacity:0; width:0; height:0; } .sw i { position:absolute; inset:0; background:var(--border); border-radius:999px; cursor:pointer; transition:.15s; }
+  .sw i:before { content:""; position:absolute; width:20px; height:20px; left:3px; top:3px; background:#fff; border-radius:50%; transition:.15s; } .sw input:checked + i { background:var(--ok); } .sw input:checked + i:before { transform:translateX(20px); }
+  /* alert pop-ups */
+  #toasts { position:fixed; top:74px; right:18px; z-index:30; display:flex; flex-direction:column; gap:12px; width:min(380px,92vw); }
+  .toast { background:var(--panel); border:1px solid var(--border); border-left:6px solid var(--warn); border-radius:12px; padding:14px 16px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+  .toast.disbursed { border-left-color:var(--err); } .toast.new_account { border-left-color:var(--accent); }
+  .toast h5 { margin:0 0 6px; font-size:15px; } .toast table { font-size:13.5px; } .toast td { padding:2px 10px 2px 0; } .toast td:first-child { color:var(--muted); } .toast .acts { margin-top:10px; text-align:right; }
+</style>
+<script>try { var t = localStorage.getItem("theme"); if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t); } catch (e) {}</script>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">KR883 · <span>Worker Dashboard</span></div>
+  <select id="worker" title="Worker"></select>
+  <select id="computer" title="Computer"></select>
+  <button class="ghost" id="prev" title="Previous day">&#9664;</button>
+  <input type="date" id="date">
+  <button class="ghost" id="next" title="Next day">&#9654;</button>
+  <button class="ghost" id="today">Today</button>
+  <span style="margin-left:auto"></span>
+  <a href="view" style="font-size:13px">Customers</a>
+  <a id="xl" href="#" style="font-size:13px">Daily summary (Excel)</a>
+  <button class="ghost" id="bell" title="Alerts and settings">&#128276; Alerts: <span id="bellState">…</span></button>
+  <button id="theme" class="ghost" type="button">Theme</button>
+</div>
+
+<div id="toasts"></div>
+<div id="settings"><div class="panel">
+  <h3>Alerts &amp; settings</h3><div class="sub">Changes save immediately.</div>
+  <div class="row"><div>Loan opened<small>A worker opens / applies a loan</small></div><label class="sw"><input type="checkbox" data-k="notify.opened"><i></i></label></div>
+  <div class="row"><div>Loan disbursed<small>A worker disburses a loan</small></div><label class="sw"><input type="checkbox" data-k="notify.disbursed"><i></i></label></div>
+  <div class="row"><div>New KR883 account<small>A login not seen on this computer before</small></div><label class="sw"><input type="checkbox" data-k="notify.newAccount"><i></i></label></div>
+  <div class="row"><div>Windows pop-up on this PC<small>A message box that stays until closed (everyone at this screen sees it)</small></div><label class="sw"><input type="checkbox" data-k="notify.popup"><i></i></label></div>
+  <div class="row"><div>Dashboard pop-up<small>Card in the corner of this page (keep the page open)</small></div><label class="sw"><input type="checkbox" data-k="notify.dashboard"><i></i></label></div>
+  <div class="row"><div>Sound<small>Beep with the dashboard pop-up</small></div><label class="sw"><input type="checkbox" data-k="notify.sound"><i></i></label></div>
+  <div class="row"><div>Work hours<small>Used to flag late starts / early finishes</small></div><div><input type="time" id="sStart"> – <input type="time" id="sEnd"></div></div>
+  <div class="row"><div>Idle gap<small>Flag a break in activity longer than (minutes)</small></div><input type="number" id="sIdle" min="5" max="120" style="width:80px"></div>
+  <div class="row"><div>Repayment target / worker / day<small>0 = no target</small></div><input type="number" id="sTarget" min="0" style="width:80px"></div>
+  <div style="text-align:right;margin-top:14px"><button id="closeSettings">Done</button></div>
+</div></div>
+
+<div class="wrap">
+  <div class="flags" id="flags"></div>
+  <div class="cards" id="cards"></div>
+  <div class="sec"><h4>Loans opened &amp; disbursed <span class="cnt" id="nloan">0</span></h4><div class="scroll" id="loans"></div>
+    <div class="note">Customer, loan amount, on-hand amount and tenure come from what the worker submitted, filled in from the Member List the worker had open.</div></div>
+  <div class="sec"><h4>Activity by hour <span class="cnt" id="hint"></span></h4>
+    <div class="chart" id="chart"></div><div class="axis" id="axis"></div>
+    <div class="legend"><span class="dot"></span>Active minutes (bar height) &nbsp;·&nbsp; hover a bar for searches and actions</div></div>
+  <div class="sec"><h4>Team today <span class="cnt" id="nteam">0</span></h4><div class="scroll" id="team"></div></div>
+  <div class="two">
+    <div class="sec"><h4>Repayments keyed in <span class="cnt" id="nrep">0</span></h4><div class="scroll" id="reps"></div></div>
+    <div class="sec"><h4>Customers searched <span class="cnt" id="ncust">0</span></h4><div class="scroll" id="custs"></div></div>
+  </div>
+  <div class="two">
+    <div class="sec"><h4>Searched but no action <span class="cnt" id="nnoact">0</span></h4><div class="scroll" id="noact"></div>
+      <div class="note">Customers looked up today that the worker never saved anything for.</div></div>
+    <div class="sec"><h4>Looked up 3+ times <span class="cnt" id="nrepeat">0</span></h4><div class="scroll" id="repeat"></div></div>
+  </div>
+  <div class="two">
+    <div class="sec"><h4>Time by screen</h4><div class="scroll" id="secs"></div></div>
+    <div class="sec"><h4>Idle gaps <span class="cnt" id="nidle">0</span></h4><div class="scroll" id="idle"></div></div>
+  </div>
+  <div class="sec"><h4>What each save / update means <span class="cnt" id="nkeys">0</span></h4><div class="scroll" id="keys"></div>
+    <div class="note">Every kind of save KR883 received. If a request is labelled wrongly (for example a disbursement shown as "other"), pick the right meaning here — it applies to all past and future data and to the alerts.</div></div>
+  <div class="sec"><h4>Alerts raised <span class="cnt" id="nnote">0</span></h4><div class="scroll" id="notes"></div></div>
+  <div class="sec"><h4>Activity log <span class="cnt" id="nlog">0</span></h4><div class="scroll" id="log"></div></div>
+  <div class="sec"><h4>Last 14 days</h4><div class="scroll tall" id="hist"></div></div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const hm = m => { m = Math.round(m); return m >= 60 ? Math.floor(m / 60) + "h " + (m % 60) + "m" : m + "m"; };
+const KINDS = [["opened", "Loan opened"], ["disbursed", "Loan disbursed"], ["repayment", "Repayment"], ["other", "Other"], ["ignore", "Ignore"]];
+let worker = "", computer = "", date = "", timer = null, CFG = null, lastNote = null, muted = false;
+function todayMYT() { return new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); }
+function shift(n) { const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
+function tbl(rows, cols, empty) {
+  if (!rows.length) return "<div class='empty'>" + esc(empty) + "</div>";
+  return "<table><tr>" + cols.map(c => "<th>" + esc(c[0]) + "</th>").join("") + "</tr>" +
+    rows.map(r => "<tr>" + cols.map(c => "<td" + (c[2] ? " class='mono'" : "") + ">" + c[1](r) + "</td>").join("") + "</tr>").join("") + "</table>";
+}
+const res = r => "<span class='pill " + (r.ok ? "p-ok" : "p-err") + "'>" + (r.ok ? "Saved" : "Failed") + "</span>";
+const money = v => v === "" || v == null ? "—" : esc(v);
+async function api(path, body) {
+  const o = body ? { method: "POST", headers: { "Content-Type": "application/json", "X-Tracker": "1" }, body: JSON.stringify(body) } : {};
+  return (await fetch(path, o)).json();
+}
+
+async function load() {
+  let d;
+  try { d = await (await fetch("api/dashboard?date=" + date + "&worker=" + encodeURIComponent(worker) + "&computer=" + encodeURIComponent(computer))).json(); } catch (e) { return; }
+  CFG = d.settings; paintBell();
+  const sel = $("#worker");
+  sel.innerHTML = "<option value=''>All workers</option>" + d.workers.map(w => "<option" + (w === worker ? " selected" : "") + ">" + esc(w) + "</option>").join("");
+  const cs = $("#computer");
+  cs.style.display = d.computers.length > 1 ? "" : "none";
+  cs.innerHTML = "<option value=''>All computers</option>" + d.computers.map(w => "<option" + (w === computer ? " selected" : "") + ">" + esc(w) + "</option>").join("");
+  const x = d.day;
+  $("#xl").href = "api/summary.xlsx?date=" + date;
+  $("#flags").innerHTML = x.flags.map(f => "<span class='pill p-warn'>" + esc(f) + "</span>").join("");
+  const tgt = CFG.targets.repayments;
+  $("#cards").innerHTML = [
+    ["Active time", hm(x.activeMinutes), x.firstActive ? x.firstActive + " → " + x.lastActive : "no activity"],
+    ["Loans opened", x.opened, "today's applications"],
+    ["Loans disbursed", x.disbursed, "money released"],
+    ["Repayments keyed", x.repayments, tgt ? "target " + tgt + (x.repayments >= tgt ? " ✓" : "") : "of " + x.actions + " saves"],
+    ["Customers searched", x.customers, x.searches + " credit reports"],
+    ["Activity logs", x.logs, "events recorded"],
+  ].map(c => "<div class='card'><div class='v'>" + esc(c[1]) + "</div><div class='l'>" + esc(c[0]) + "</div><div class='s'>" + esc(c[2]) + "</div></div>").join("");
+  const loans = x.openedList.concat(x.disbursedList).sort((a, b) => b.time.localeCompare(a.time));
+  $("#nloan").textContent = loans.length;
+  $("#loans").innerHTML = tbl(loans, [["Time", r => esc(r.time), 1], ["Worker", r => esc(r.worker || "—")],
+    ["Action", r => "<span class='pill " + (r.kind === "disbursed" ? "p-err" : "p-warn") + "'>" + (r.kind === "disbursed" ? "Disbursed" : "Opened") + "</span>"],
+    ["Customer", r => esc(r.name || "—") + "<br><span style='color:var(--muted);font-size:12px'>" + esc(r.ic) + "</span>"],
+    ["Loan amount", r => money(r.amount), 1], ["On-hand", r => money(r.onHand), 1], ["Tenure", r => r.tenure ? esc(r.tenure) + " d" : "—", 1], ["Result", res]], "No loans opened or disbursed.");
+  const mx = Math.max(1, ...x.hours.map(h => h.activeMin));
+  $("#hint").textContent = "peak " + mx + " min / hour";
+  $("#chart").innerHTML = x.hours.map(h => "<div class='col' title='" + h.hour + ":00 — " + h.activeMin + " min active, " + h.searches + " searches, " + h.actions + " actions'><div class='bar' style='height:" + (h.activeMin / mx * 100) + "%'></div></div>").join("");
+  $("#axis").innerHTML = x.hours.map(h => "<div>" + (h.hour % 3 === 0 ? h.hour : "") + "</div>").join("");
+  $("#nteam").textContent = d.leaderboard.length;
+  $("#team").innerHTML = tbl(d.leaderboard, [["Worker", r => "<b>" + esc(r.worker) + "</b>"], ["Active", r => hm(r.activeMinutes), 1], ["Hours", r => esc(r.firstActive + " – " + r.lastActive), 1],
+    ["Customers", r => r.customers], ["Opened", r => r.opened], ["Disbursed", r => r.disbursed],
+    ["Repayments", r => r.repayments + (r.target ? " / " + r.target : "") + (r.target && r.repayments >= r.target ? " ✓" : "")]], "No worker activity this day.");
+  $("#nrep").textContent = x.repaymentList.length;
+  $("#reps").innerHTML = tbl(x.repaymentList, [["Time", r => esc(r.time), 1], ["IC", r => esc(r.ic || "—"), 1], ["Amount", r => money(r.amount), 1], ["Result", res], ["Worker", r => esc(r.worker || "—")]], "No repayments keyed in.");
+  $("#ncust").textContent = x.customersSearched.length;
+  $("#custs").innerHTML = tbl(x.customersSearched, [["Last", r => esc(r.last), 1], ["Customer", r => esc(r.name || "—")], ["IC", r => esc(r.ic), 1], ["×", r => esc(r.times)]], "No customers searched.");
+  $("#nnoact").textContent = x.noAction.length;
+  $("#noact").innerHTML = tbl(x.noAction, [["Last", r => esc(r.last), 1], ["Customer", r => esc(r.name || "—")], ["IC", r => esc(r.ic), 1]], "Every searched customer had an action.");
+  $("#nrepeat").textContent = x.repeatLookups.length;
+  $("#repeat").innerHTML = tbl(x.repeatLookups, [["Customer", r => esc(r.name || "—")], ["IC", r => esc(r.ic), 1], ["Times", r => "<b>" + esc(r.times) + "</b>"]], "Nobody looked up 3 or more times.");
+  $("#secs").innerHTML = tbl(x.sections, [["Screen", r => esc(r.section)], ["Active time", r => "<span class='mini' style='width:" + Math.max(3, r.minutes / x.sections[0].minutes * 120) + "px'></span>" + hm(r.minutes)]], "No activity.");
+  $("#nidle").textContent = x.idleGaps.length;
+  $("#idle").innerHTML = tbl(x.idleGaps, [["From", r => esc(r.from), 1], ["To", r => esc(r.to), 1], ["Break", r => hm(r.minutes)]], "No gap of " + x.idleMinutes + "+ minutes.");
+  $("#nkeys").textContent = d.actionKeys.length;
+  $("#keys").innerHTML = tbl(d.actionKeys, [["Request", r => "<code>" + esc(r.key) + "</code>"], ["Seen", r => esc(r.count) + "×", 1], ["Last", r => esc(r.last), 1],
+    ["Means", r => "<select data-key=\"" + esc(r.key) + "\">" + KINDS.map(k => "<option value='" + k[0] + "'" + (k[0] === r.kind ? " selected" : "") + ">" + k[1] + "</option>").join("") + "</select>"]],
+    "No saves or updates seen yet. They appear here as soon as a worker saves something in KR883.");
+  $("#nlog").textContent = x.timeline.length;
+  $("#log").innerHTML = tbl(x.timeline, [["Time", r => esc(r.time), 1], ["What", r => esc(r.text) + (r.name ? " — " + esc(r.name) : "")], ["Worker", r => esc(r.worker || "—")]], "Nothing logged.");
+  const mh = Math.max(1, ...d.history.map(h => h.activeMinutes));
+  $("#hist").innerHTML = tbl(d.history, [["Date", r => esc(r.date) + (r.date === todayMYT() ? " (today)" : ""), 1],
+    ["Active time", r => "<span class='mini' style='width:" + Math.max(2, r.activeMinutes / mh * 140) + "px'></span>" + hm(r.activeMinutes)],
+    ["Customers", r => r.customers], ["Opened", r => r.opened], ["Disbursed", r => r.disbursed], ["Repayments", r => r.repayments], ["Actions", r => r.actions], ["Logs", r => r.logs]], "No data.");
+}
+$("#keys").addEventListener("change", async e => { const k = e.target.dataset && e.target.dataset.key; if (k) { await api("api/settings", { rule: { key: k, kind: e.target.value } }); load(); } });
+
+/* ---- alerts ---- */
+function paintBell() {
+  const n = CFG.notify, on = [n.opened && "opened", n.disbursed && "disbursed"].filter(Boolean);
+  $("#bellState").textContent = on.length === 2 ? "ON" : on.length ? "partly" : "OFF";
+  document.querySelectorAll("#settings input[data-k]").forEach(i => { const [a, b] = i.dataset.k.split("."); i.checked = !!CFG[a][b]; });
+  if (document.activeElement !== $("#sStart")) $("#sStart").value = CFG.schedule.start;
+  if (document.activeElement !== $("#sEnd")) $("#sEnd").value = CFG.schedule.end;
+  if (document.activeElement !== $("#sIdle")) $("#sIdle").value = CFG.idleMinutes;
+  if (document.activeElement !== $("#sTarget")) $("#sTarget").value = CFG.targets.repayments;
+}
+$("#bell").onclick = () => $("#settings").classList.add("on");
+$("#closeSettings").onclick = () => { $("#settings").classList.remove("on"); load(); };
+$("#settings").onclick = e => { if (e.target.id === "settings") $("#closeSettings").onclick(); };
+document.querySelectorAll("#settings input[data-k]").forEach(i => i.onchange = async () => {
+  const [a, b] = i.dataset.k.split("."); CFG = await api("api/settings", { [a]: { [b]: i.checked } }); paintBell();
+});
+const num = id => Math.max(0, parseInt($(id).value || "0", 10) || 0);
+$("#sStart").onchange = async () => { CFG = await api("api/settings", { schedule: { start: $("#sStart").value } }); };
+$("#sEnd").onchange = async () => { CFG = await api("api/settings", { schedule: { end: $("#sEnd").value } }); };
+$("#sIdle").onchange = async () => { CFG = await api("api/settings", { idleMinutes: Math.max(5, num("#sIdle")) }); };
+$("#sTarget").onchange = async () => { CFG = await api("api/settings", { targets: { repayments: num("#sTarget") } }); };
+
+function beep() {
+  try { const c = new (window.AudioContext || window.webkitAudioContext)(); [0, .25].forEach(t => { const o = c.createOscillator(), g = c.createGain();
+    o.frequency.value = 880; g.gain.value = .15; o.connect(g); g.connect(c.destination); o.start(c.currentTime + t); o.stop(c.currentTime + t + .18); }); } catch (e) {}
+}
+const TITLE = { opened: "Loan being OPENED", disbursed: "Loan being DISBURSED", new_account: "New KR883 account" };
+function toast(n) {
+  const el = document.createElement("div"); el.className = "toast " + n.type;
+  const rows = n.type === "new_account" ? [["Account", n.worker]] :
+    [["Worker", n.worker || "—"], ["Customer", (n.name || "(unknown)") + (n.ic ? "  " + n.ic : "")], ["Loan amount", n.amount || "—"], ["On-hand", n.on_hand || "—"],
+     ["Tenure", n.tenure ? n.tenure + " days" : "—"], ["Result", n.ok ? "Saved" : "FAILED"]];
+  el.innerHTML = "<h5>🔔 " + (TITLE[n.type] || n.type) + "</h5><table>" + rows.map(r => "<tr><td>" + r[0] + "</td><td><b>" + esc(r[1]) + "</b></td></tr>").join("") +
+    "</table><div class='acts'><span style='color:var(--muted);font-size:12px;float:left'>" + esc(n.time) + "</span><button class='ghost'>Dismiss</button></div>";
+  el.querySelector("button").onclick = () => { el.remove(); api("api/notifications", { upto: n.id }); };
+  $("#toasts").prepend(el);
+}
+async function pollNotes() {
+  try {
+    const d = await (await fetch("api/notifications?after=" + (lastNote || 0))).json();
+    const items = d.items.slice().reverse();
+    if (lastNote === null) { lastNote = items.length ? items[items.length - 1].id : 0; $("#nnote").textContent = d.items.length; renderNotes(d.items); return; }
+    if (items.length) {
+      lastNote = items[items.length - 1].id;
+      if (CFG && CFG.notify.dashboard) { items.forEach(toast); if (CFG.notify.sound) beep(); }
+      const all = await (await fetch("api/notifications?after=0")).json(); renderNotes(all.items);
+    }
+  } catch (e) {}
+}
+function renderNotes(items) {
+  $("#nnote").textContent = items.length;
+  $("#notes").innerHTML = tbl(items, [["Time", r => esc(r.time), 1], ["Alert", r => "<span class='pill " + (r.type === "disbursed" ? "p-err" : r.type === "opened" ? "p-warn" : "p-grey") + "'>" + esc(TITLE[r.type] || r.type) + "</span>"],
+    ["Worker", r => esc(r.worker || "—")], ["Customer", r => esc((r.name || "") + (r.type === "new_account" ? "" : " " + (r.ic || "")))], ["Amount", r => money(r.amount), 1], ["On-hand", r => money(r.on_hand), 1], ["Tenure", r => r.tenure ? esc(r.tenure) + " d" : "—", 1]], "No alerts yet.");
+}
+
+function go() { load(); clearTimeout(timer); if (date === todayMYT()) timer = setTimeout(go, 30000); }
+$("#worker").onchange = e => { worker = e.target.value; go(); };
+$("#computer").onchange = e => { computer = e.target.value; go(); };
+$("#date").onchange = e => { date = e.target.value || todayMYT(); go(); };
+$("#prev").onclick = () => { date = shift(-1); $("#date").value = date; go(); };
+$("#next").onclick = () => { date = shift(1); $("#date").value = date; go(); };
+$("#today").onclick = () => { date = todayMYT(); $("#date").value = date; go(); };
+function themeNow() { return document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
+function paint() { $("#theme").textContent = themeNow() === "dark" ? "☀ Light" : "\u{1F319} Dark"; }
+$("#theme").onclick = () => { const n = themeNow() === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", n); try { localStorage.setItem("theme", n); } catch (e) {} paint(); };
+paint(); date = todayMYT(); $("#date").value = date; go(); pollNotes(); setInterval(pollNotes, 4000);
+</script>
+</body>
+</html>

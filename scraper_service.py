@@ -3130,6 +3130,31 @@ async def handle_check(request):
         **{k: v for k, v in enrich_row(full).items() if k in ("topRemark", "openLoans")},
     })
 
+# ---------------- Worker tracker (separate project in ./worker-tracker) ----------------
+# The tracker runs as its own small server on 127.0.0.1:8780. This forwards /tracker/<path> to it so the one
+# ngrok link serves both. Everything is admin-only (auth_middleware) EXCEPT /tracker/activity, which the
+# browser extension on the workers' computers posts to and which the tracker guards with its own shared key.
+TRACKER_URL = os.environ.get("TRACKER_URL", "http://127.0.0.1:8780").rstrip("/")
+_TRACKER_FWD = ("Content-Type", "X-Activity-Key", "X-Tracker", "Accept")
+
+
+async def handle_tracker(request):
+    tail = request.match_info.get("tail", "")
+    if not tail:
+        raise web.HTTPFound("/tracker/dashboard")
+    url = TRACKER_URL + "/" + tail + (("?" + request.query_string) if request.query_string else "")
+    headers = {k: request.headers[k] for k in _TRACKER_FWD if k in request.headers}
+    body = await request.read()
+    try:
+        async with ClientSession(timeout=ClientTimeout(total=60)) as s:
+            async with s.request(request.method, url, data=body or None, headers=headers, allow_redirects=False) as r:
+                data = await r.read()
+                out = {k: r.headers[k] for k in ("Content-Type", "Content-Disposition", "Cache-Control") if k in r.headers}
+                return web.Response(status=r.status, body=data, headers=out)
+    except Exception:
+        return web.json_response({"error": "The worker tracker is not running on this computer."}, status=502)
+
+
 async def handle_rp_status(request):
     return web.json_response(await get_rp_state())
 
@@ -3206,7 +3231,7 @@ async def auth_middleware(request, handler):
     if not AUTH_ON:
         return await handler(request)
     path = request.path
-    if path in ("/login", "/logout"):
+    if path in ("/login", "/logout", "/tracker/activity"):   # /tracker/activity: the worker tracker's extension, guarded by its own key
         return await handler(request)
 
     role = role_from_token(request.cookies.get(AUTH_COOKIE))
@@ -3692,7 +3717,7 @@ async def handle_members_download(request):
 
 
 def make_app():
-    app = web.Application(middlewares=[auth_middleware])
+    app = web.Application(middlewares=[auth_middleware], client_max_size=32 * 1024 * 1024)
     app.on_startup.append(_on_startup)
     app.router.add_get("/", handle_index)
     app.router.add_route("*", "/login", handle_login)
@@ -3725,6 +3750,7 @@ def make_app():
     app.router.add_get("/candidates/preview", handle_candidates_preview)
     app.router.add_post("/check", handle_check)
     app.router.add_get("/credit-report", handle_credit_report)
+    app.router.add_route("*", "/tracker/{tail:.*}", handle_tracker)
     app.router.add_get("/royalpay/status", handle_rp_status)
     app.router.add_post("/royalpay/scrape", handle_rp_scrape)
     return app
