@@ -33,7 +33,7 @@ import asyncio, os, random, re, time, uuid
 # open_login_window() wants a REAL on-screen window for the human, self.headless is False and the
 # off-screen args are skipped, so it appears normally.
 STEALTH_ARGS = ["--disable-blink-features=AutomationControlled", "--exclude-switches=enable-automation"]
-OFFSCREEN_ARGS = ["--start-minimized"]
+OFFSCREEN_ARGS = ["--window-position=-32000,-32000", "--window-size=1400,1000", "--no-first-run", "--no-default-browser-check"]
 MANUAL_REAUTH_REQUIRED = "MANUAL_REAUTH_REQUIRED"
 
 
@@ -265,6 +265,17 @@ class UiCreditReportProvider(CreditReportProvider):
         if not found and self.relogin_creds:
             if await self.sync.auto_relogin_cdp(*self.relogin_creds):
                 found = await self.sync.find_source()
+        if not found and self.relogin_creds:
+            # Normal Chrome isn't running/reachable (auto-open is off) or couldn't re-login: sign in
+            # directly inside this hidden dedicated browser so the search just works.
+            if await self._login_dedicated(*self.relogin_creds):
+                self.log("[relogin] signed in inside the dedicated browser")
+                try:
+                    await self._open_member_list()
+                    await self._read_account()
+                    return True
+                except ReauthRequired:
+                    return False
         if not found:
             return False
         ls, where = found
@@ -278,6 +289,57 @@ class UiCreditReportProvider(CreditReportProvider):
             await self._read_account()
             return True
         except ReauthRequired:
+            return False
+
+    async def _login_dedicated(self, username, password, totp_secret):
+        """Sign in with the .env credentials + TOTP in this (off-screen) dedicated context. Used only
+        when no normal-Chrome session can be synced. Credentials are never logged."""
+        if not (username and password and totp_secret and self.page):
+            return False
+        from session_sync import _totp_now
+        p = self.page
+        try:
+            # Drop the dead session first: with a stale token still in localStorage the SPA treats
+            # /login as "already signed in" and bounces away, which would look like a successful login.
+            if not p.url.startswith(self.base):
+                await p.goto(self.base + "/login", wait_until="domcontentloaded", timeout=60000)
+            await p.evaluate("() => { try { localStorage.clear(); sessionStorage.clear(); } catch (e) {} }")
+            await self.ctx.clear_cookies()
+            await p.goto(self.base + "/login", wait_until="domcontentloaded", timeout=60000)
+            await p.wait_for_timeout(1500)
+            if "login" not in p.url:
+                return False        # still bounced away - not genuinely signed in
+            await p.fill("input[type=text]", username)
+            await p.fill("input[type=password]", password)
+            try:
+                await p.get_by_role("button", name="Sign in").click(timeout=5000)
+            except Exception:
+                await p.keyboard.press("Enter")
+            await p.wait_for_timeout(3000)
+            if "login" in p.url:                      # 2FA step
+                box = p.locator("input:not([type=password])").first
+                for _ in range(2):                    # a code can straddle a 30s boundary
+                    try:
+                        code, left = _totp_now(totp_secret)
+                        if left < 4:
+                            await asyncio.sleep(left + 0.5)
+                            code, left = _totp_now(totp_secret)
+                        await box.wait_for(state="visible", timeout=8000)
+                        await box.fill(code)
+                        await p.wait_for_timeout(500)
+                        for label in ("Verify", "Submit", "Continue", "Sign in"):
+                            btn = p.get_by_role("button", name=label)
+                            if await btn.count() and await btn.first.is_enabled():
+                                await btn.first.click()
+                                break
+                        await p.wait_for_timeout(3000)
+                        if "login" not in p.url:
+                            break
+                    except Exception:
+                        await p.wait_for_timeout(1500)
+            return "login" not in p.url
+        except Exception as e:
+            self.log(f"[relogin] dedicated login error: {type(e).__name__}: {str(e)[:120]}")
             return False
 
     async def _open_member_list_or_sync(self):
