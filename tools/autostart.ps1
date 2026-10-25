@@ -1,7 +1,7 @@
 # Auto-start the credit report tool + ngrok tunnel at login. Hidden, with guards so nothing
 # double-starts. Launched by the Startup-folder VBS.
 $ErrorActionPreference = "SilentlyContinue"
-$app = "C:\Users\User\Desktop\Scraper\kwscraper"
+$app = Split-Path -Parent $PSScriptRoot
 Set-Location $app
 
 # 1. Scraper service (self-exits if port 8765 is already served, so a double-launch is harmless)
