@@ -52,6 +52,16 @@ Full steps for Claude to follow: see [CLAUDE.md](CLAUDE.md).
   updated on every new search.  **Excel** - `/tracker/tracker.xlsx`.
 * Data lives in `data/` (`tracker.db`, `worker_tracker.xlsx`, `reports/`, `settings.json`) - local, not in git.
 
+
+## LG-CRM sync
+Loan opened / disbursed / repayment events, other saves, searches, new accounts and daily summaries are pushed
+to LG-CRM automatically (queued + retried). Set it up in the dashboard's **LG-CRM sync** section. What LG-CRM
+must implement and the exact JSON are in [LG-CRM-INTEGRATION.md](LG-CRM-INTEGRATION.md); `mock_crm.py` is a fake
+LG-CRM for testing.
+
+## Date pickers
+Dashboard: any day (arrows / date box). Customers page (`/view`): filter by the dates customers were last searched.
+
 ## Update
 `git pull` on the tracker PC, then restart the tracker (`Stop-Process` its python, run `start-hidden.vbs`).
 Extension changes: pull on each PC and click reload on `chrome://extensions`.

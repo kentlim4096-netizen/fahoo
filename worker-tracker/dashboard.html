@@ -110,6 +110,18 @@
   </div>
   <div class="sec"><h4>What each save / update means <span class="cnt" id="nkeys">0</span></h4><div class="scroll" id="keys"></div>
     <div class="note">Every kind of save KR883 received. If a request is labelled wrongly (for example a disbursement shown as "other"), pick the right meaning here — it applies to all past and future data and to the alerts.</div></div>
+  <div class="sec"><h4>LG-CRM sync <span class="cnt" id="crmState">...</span></h4>
+    <div id="crmStatus" style="padding:12px 18px;font-size:14px"></div>
+    <div style="padding:0 18px 14px;display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <label style="grid-column:1/3;font-size:12px;color:var(--muted)">LG-CRM address (where events are sent)<input id="crmUrl" placeholder="https://your-lg-crm/api/worker-tracker/events" style="width:100%;display:block;margin-top:3px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 11px;font:inherit"></label>
+      <label style="font-size:12px;color:var(--muted)">API token<input id="crmToken" type="password" autocomplete="off" style="width:100%;display:block;margin-top:3px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:8px 11px;font:inherit"></label>
+      <label style="font-size:12px;color:var(--muted)">Sent as<select id="crmAuth" style="width:100%;display:block;margin-top:3px"><option value="bearer">Authorization: Bearer token</option><option value="header">X-API-Key header</option><option value="none">No token</option></select></label>
+      <div style="grid-column:1/3;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <label class="sw"><input type="checkbox" id="crmOn"><i></i></label><span id="crmOnLbl">Send to LG-CRM</span>
+        <button id="crmSave">Save</button><button class="ghost" id="crmTest">Send test event</button><button class="ghost" id="crmRetry">Retry failed</button>
+        <span id="crmMsg" style="color:var(--muted);font-size:13px"></span></div>
+    </div>
+    <div class="note">Sends every loan opened / disbursed / repayment, other saves, credit-report searches, new KR883 accounts and a daily summary per worker. Nothing is lost if LG-CRM is down: events wait and are retried. See LG-CRM-INTEGRATION.md.</div></div>
   <div class="sec"><h4>Alerts raised <span class="cnt" id="nnote">0</span></h4><div class="scroll" id="notes"></div></div>
   <div class="sec"><h4>Activity log <span class="cnt" id="nlog">0</span></h4><div class="scroll" id="log"></div></div>
   <div class="sec"><h4>Last 14 days</h4><div class="scroll tall" id="hist"></div></div>
@@ -248,6 +260,28 @@ function renderNotes(items) {
     ["Worker", r => esc(r.worker || "—")], ["Customer", r => esc((r.name || "") + (r.type === "new_account" ? "" : " " + (r.ic || "")))], ["Amount", r => money(r.amount), 1], ["On-hand", r => money(r.on_hand), 1], ["Tenure", r => r.tenure ? esc(r.tenure) + " d" : "—", 1]], "No alerts yet.");
 }
 
+
+/* ---- LG-CRM sync ---- */
+async function loadCrm() {
+  let r; try { r = await (await fetch("api/crm")).json(); } catch (e) { return; }
+  const c = r.config, s = r.status, ae = document.activeElement.id || "";
+  if (!ae.startsWith("crm")) { $("#crmUrl").value = c.url; $("#crmAuth").value = c.auth; $("#crmOn").checked = c.enabled; $("#crmToken").placeholder = c.hasToken ? "saved (type to replace)" : ""; }
+  $("#crmState").textContent = !c.url ? "not set up" : c.enabled ? "ON" : "paused";
+  $("#crmStatus").innerHTML = "Waiting to send: <b>" + s.pending + "</b> &nbsp;·&nbsp; Sent: <b>" + s.sent + "</b> &nbsp;·&nbsp; Failed for good: <b" + (s.failed ? " style='color:var(--err)'" : "") + ">" + s.failed + "</b>" +
+    (s.lastOk ? " &nbsp;·&nbsp; Last delivery: " + esc(s.lastOk.replace("T", " ").slice(0, 19)) + " UTC" : "") +
+    (s.lastError ? "<div style='color:var(--err);margin-top:4px'>Last problem: " + esc(s.lastError) + "</div>" : "");
+}
+async function crmPost(body, okMsg) {
+  const r = await api("api/crm", body);
+  $("#crmMsg").textContent = r.error ? r.error : okMsg;
+  $("#crmMsg").style.color = r.error ? "var(--err)" : "var(--ok)";
+  loadCrm(); setTimeout(() => $("#crmMsg").textContent = "", 6000);
+}
+$("#crmSave").onclick = () => crmPost({ url: $("#crmUrl").value, token: $("#crmToken").value, auth: $("#crmAuth").value, enabled: $("#crmOn").checked }, "Saved");
+$("#crmTest").onclick = () => crmPost({ action: "test" }, "Test event queued");
+$("#crmRetry").onclick = () => crmPost({ action: "retry" }, "Failed events will be retried");
+$("#crmOn").onchange = () => crmPost({ enabled: $("#crmOn").checked }, $("#crmOn").checked ? "Sending is ON" : "Sending paused");
+
 function go() { load(); clearTimeout(timer); if (date === todayMYT()) timer = setTimeout(go, 30000); }
 $("#worker").onchange = e => { worker = e.target.value; go(); };
 $("#computer").onchange = e => { computer = e.target.value; go(); };
@@ -258,7 +292,7 @@ $("#today").onclick = () => { date = todayMYT(); $("#date").value = date; go(); 
 function themeNow() { return document.documentElement.getAttribute("data-theme") || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"); }
 function paint() { $("#theme").textContent = themeNow() === "dark" ? "☀ Light" : "\u{1F319} Dark"; }
 $("#theme").onclick = () => { const n = themeNow() === "dark" ? "light" : "dark"; document.documentElement.setAttribute("data-theme", n); try { localStorage.setItem("theme", n); } catch (e) {} paint(); };
-paint(); date = todayMYT(); $("#date").value = date; go(); pollNotes(); setInterval(pollNotes, 4000);
+paint(); date = todayMYT(); $("#date").value = date; go(); pollNotes(); setInterval(pollNotes, 4000); loadCrm(); setInterval(loadCrm, 15000);
 </script>
 </body>
 </html>

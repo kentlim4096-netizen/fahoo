@@ -9,6 +9,9 @@ import asyncio, datetime, hmac, io, json, os, re, subprocess
 
 from aiohttp import web
 
+import aiohttp
+
+import crm
 import settings
 import store
 import tracker
@@ -19,6 +22,7 @@ XLSX = os.path.join(HERE, "data", "worker_tracker.xlsx")
 DB = os.path.join(HERE, "data", "tracker.db")
 SETTINGS = os.path.join(HERE, "data", "settings.json")
 store.init(DB)
+crm.init(DB)
 KNOWN = set(store.workers(DB))   # KR883 accounts already seen on this computer
 KEY = CONFIG["key"]
 
@@ -44,19 +48,58 @@ def check_new_account(ev, cfg):
         return
     first_ever = not KNOWN
     KNOWN.add(w)
-    if first_ever or not cfg["notify"]["newAccount"]:
+    if first_ever:
         return                                                  # the very first account is just the baseline
+    crm.enqueue(DB, "worker.new_account", ev.get("at"), _source(ev), {"note": "First time this KR883 account is seen on any tracked computer"})
+    if not cfg["notify"]["newAccount"]:
+        return
     store.add_notification(DB, ev.get("at"), "new_account", w, {"name": w}, True, "First time this KR883 account is seen on this computer")
     if cfg["notify"]["popup"]:
         popup("Worker Tracker - new KR883 account", f"A KR883 account not seen before is now active on this computer:\n\n{w}")
+
+
+def _source(ev):
+    return {"worker": ev.get("worker") or "", "computer": ev.get("computer") or ""}
+
+
+def _member_id(ev):
+    req = ev.get("request") if isinstance(ev.get("request"), dict) else {}
+    for k in ("member", "member_id", "member_uuid", "customer", "customer_id"):
+        if req.get(k) not in (None, ""):
+            return str(req[k])
+    m = re.search(r"/members?/([^/]+)/", ev.get("path") or "")
+    return m.group(1) if m else None
+
+
+def _txt(v):
+    return None if v in (None, "") else str(v)
+
+
+def push_action_to_crm(ev, cls, info):
+    """Queue the LG-CRM event for one save: loan.opened / loan.disbursed / loan.repayment, or activity.action."""
+    ok = (ev.get("status") or 0) < 400
+    result = {"ok": ok, "http_status": ev.get("status")}
+    request_info = {"method": ev.get("method"), "path": ev.get("path")}
+    if cls in ("opened", "disbursed", "repayment"):
+        crm.enqueue(DB, "loan." + cls, ev.get("at"), _source(ev), {
+            "loan": {"kr883_loan_id": crm.loan_id_of(ev.get("path"), ev.get("request"), ev.get("response")),
+                     "customer": {"name": info.get("name"), "ic": info.get("ic"), "kr883_member_id": _member_id(ev)},
+                     "amount": _txt(info.get("amount") if cls != "repayment" else store.amount_of(ev.get("request"))),
+                     "on_hand_amount": _txt(info.get("onHand")), "tenure_days": _txt(info.get("tenure"))},
+            "result": result, "request": request_info, "raw_request": ev.get("request")})
+    elif cls != "ignore":
+        crm.enqueue(DB, "activity.action", ev.get("at"), _source(ev), {
+            "customer": {"ic": info.get("ic")} if info.get("ic") else None, "result": result, "request": request_info})
 
 
 def process_action(ev, cfg):
     """Store a save/update action and, if it is a loan being opened / disbursed and that alert is on, raise it."""
     rid = store.add(DB, ev)
     cls = store.classify(ev.get("method"), ev.get("path"), ev.get("request"), cfg["rules"])
+    info = store.loan_info(DB, store.find_ic(ev.get("request"), ev.get("path"), ev.get("response")), ev.get("request"), ev.get("response"))
+    if rid:
+        push_action_to_crm(ev, cls, info)
     if rid and cls in ("opened", "disbursed") and cfg["notify"].get(cls):
-        info = store.loan_info(DB, store.find_ic(ev.get("request"), ev.get("path"), ev.get("response")), ev.get("request"), ev.get("response"))
         ok = (ev.get("status") or 0) < 400
         store.add_notification(DB, ev.get("at"), cls, ev.get("worker") or "", info, ok, f"{ev.get('method')} {ev.get('path')} -> {ev.get('status')}")
         if cfg["notify"]["popup"]:
@@ -98,10 +141,52 @@ async def activity(request):
         if ok and kind == "Credit report":
             cd = b.get("customer_details") or {}
             await loop.run_in_executor(None, store.add_lookup, DB, "search", ev, q.get("ic_number") or cd.get("ic_number"), cd.get("name"))
+            crm.enqueue(DB, "activity.search", ev.get("at"), _source(ev), {
+                "customer": {"name": cd.get("name"), "ic": tracker.dash(q.get("ic_number") or cd.get("ic_number"))},
+                "blacklist_count": cd.get("blacklist_count"), "overdue_days": cd.get("active_overdue_days"),
+                "loans_total": len(b.get("loan_details") or [])})
         elif ok and q.get("ic"):
             rows = b.get("results") or []
             await loop.run_in_executor(None, store.add_lookup, DB, "lookup", ev, q.get("ic"), (rows[0].get("full_name") if len(rows) == 1 else ""))
     return web.json_response({"ok": True, "recorded": bool(ok)})
+
+
+async def crm_api(request):
+    """LG-CRM connection: GET = status; POST = save settings / send a test event / retry failed events."""
+    loop = asyncio.get_running_loop()
+    if request.method == "POST":
+        if not _csrf_ok(request):
+            return web.json_response({"error": "forbidden"}, status=403)
+        body = await request.json()
+        act = body.pop("action", "")
+        try:
+            if act == "test":
+                if not crm.load_config()["url"]:
+                    return web.json_response({"error": "Enter the LG-CRM address first."}, status=400)
+                crm.enqueue(DB, "test.ping", datetime.datetime.now(datetime.timezone.utc).isoformat(), {"worker": "", "computer": ""},
+                            {"note": "Test event from the worker tracker dashboard"})
+            elif act == "retry":
+                crm.retry_failed(DB)
+            else:
+                crm.save_config(body)
+        except ValueError as e:
+            return web.json_response({"error": str(e)}, status=400)
+    return web.json_response({"config": crm.public_config(), "status": await loop.run_in_executor(None, crm.status, DB)})
+
+
+async def _background(app):
+    app["crm_sender"] = asyncio.create_task(crm.sender_loop(DB, lambda: aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))))
+
+    async def summary_loop():
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(600)
+            try:
+                cfg = settings.load(SETTINGS)
+                await loop.run_in_executor(None, crm.summaries, DB, store, cfg["rules"], cfg)
+            except Exception as e:
+                log(f"summary push failed: {e}")
+    app["crm_summary"] = asyncio.create_task(summary_loop())
 
 
 async def download(request):
@@ -326,8 +411,9 @@ async def view(request):
 
 def main():
     app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[guard])
+    app.on_startup.append(_background)
     app.add_routes([web.post("/activity", activity), web.get("/tracker.xlsx", download), web.get("/api/customers", customers), web.get("/view", view), web.get("/dashboard", dashboard), web.get("/api/dashboard", dashboard_api), web.route("*", "/api/settings", settings_api),
-                    web.route("*", "/api/notifications", notifications_api), web.get("/api/summary.xlsx", summary_xlsx), web.get("/", status)])
+                    web.route("*", "/api/notifications", notifications_api), web.route("*", "/api/crm", crm_api), web.get("/api/summary.xlsx", summary_xlsx), web.get("/", status)])
     web.run_app(app, host="127.0.0.1", port=CONFIG.get("port", 8780), print=lambda *_: None)
 
 

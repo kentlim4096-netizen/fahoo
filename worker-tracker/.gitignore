@@ -4,3 +4,4 @@ config.json
 extension/kr883-activity-logger/config.js
 __pycache__/
 *.pyc
+crm.json

@@ -79,6 +79,7 @@
   .rp-empty { padding: 22px; text-align: center; color: var(--muted); font-size: 14px; }
   [hidden] { display: none !important; }
 
+  .dt { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 13px; }
   .layout { display: grid; grid-template-columns: 330px 1fr; gap: 20px; max-width: 1400px; margin: 0 auto; padding: 22px 20px 80px; align-items: start; }
   .side { position: sticky; top: 76px; background: var(--panel); border: 1px solid var(--border); border-radius: 14px; max-height: calc(100vh - 96px); overflow: auto; }
   .cust { padding: 12px 16px; border-top: 1px solid var(--border); cursor: pointer; }
@@ -98,6 +99,7 @@
   <div class="topbar">
     <div class="brand">KR883 · <span>Worker Tracker</span></div>
     <div class="searchbox"><input id="ic" type="text" placeholder="Filter by name or IC" autofocus></div>
+    <span style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)" title="Show customers last searched on these dates">Searched <input id="dFrom" type="date" class="dt"> to <input id="dTo" type="date" class="dt"> <button class="ghost" id="dToday" style="padding:6px 10px;font-size:12px">Today</button> <button class="ghost" id="dClear" style="padding:6px 10px;font-size:12px">All</button></span>
     <span id="count" style="color:var(--muted);font-size:13px"></span>
     <button id="theme" class="ghost theme-btn" type="button" style="margin-left:auto" title="Switch light / dark theme">Theme</button>
     <a href="dashboard" style="font-size:13px">Worker dashboard</a> <a href="tracker.xlsx" style="font-size:13px">Download Excel</a>
@@ -239,7 +241,9 @@ function renderReport(r) {
 let DATA = [], CUR = null;
 function drawList() {
   const q = $("#ic").value.toLowerCase().trim(), qd = q.replace(/\D/g, "");
-  const rows = DATA.filter(c => !q || (c.name || "").toLowerCase().includes(q) || (qd && c.ic.replace(/\D/g, "").includes(qd)));
+  const from = $("#dFrom").value, to = $("#dTo").value;
+  const rows = DATA.filter(c => (!q || (c.name || "").toLowerCase().includes(q) || (qd && c.ic.replace(/\D/g, "").includes(qd))) &&
+    (!from || c.tracker.last.slice(0, 10) >= from) && (!to || c.tracker.last.slice(0, 10) <= to));
   $("#count").textContent = DATA.length + " customer" + (DATA.length === 1 ? "" : "s");
   $("#side").innerHTML = rows.map(c => {
     const cd = c.customer || {};
@@ -270,6 +274,9 @@ async function load(first) {
 }
 $("#side").onclick = e => { const el = e.target.closest(".cust"); if (el) pick(el.dataset.ic); };
 $("#ic").oninput = drawList;
+$("#dFrom").onchange = $("#dTo").onchange = drawList;
+$("#dToday").onclick = () => { const t = new Date(Date.now() + 8 * 3600e3).toISOString().slice(0, 10); $("#dFrom").value = $("#dTo").value = t; drawList(); };
+$("#dClear").onclick = () => { $("#dFrom").value = $("#dTo").value = ""; drawList(); };
 
 function themeNow() {
   const t = document.documentElement.getAttribute("data-theme");
