@@ -26,6 +26,37 @@ crm.init(DB)
 KNOWN = set(store.workers(DB))   # KR883 accounts already seen on this computer
 KEY = CONFIG["key"]
 
+SUBSCRIBERS = set()   # live viewers of /view, pushed to the instant a customer search lands
+
+
+def notify_customers_changed():
+    for q in list(SUBSCRIBERS):
+        try:
+            q.put_nowait(True)
+        except asyncio.QueueFull:
+            pass
+
+
+async def stream(request):
+    """SSE: /view listens on this and reloads the instant a new customer search is recorded."""
+    resp = web.StreamResponse(headers={"Content-Type": "text/event-stream", "Cache-Control": "no-cache"})
+    await resp.prepare(request)
+    q = asyncio.Queue(maxsize=4)
+    SUBSCRIBERS.add(q)
+    try:
+        await resp.write(b": connected\n\n")
+        while True:
+            try:
+                await asyncio.wait_for(q.get(), timeout=25)
+                await resp.write(b"data: update\n\n")
+            except asyncio.TimeoutError:
+                await resp.write(b": ping\n\n")   # keeps the connection alive
+    except (ConnectionResetError, ConnectionAbortedError, asyncio.CancelledError):
+        pass
+    finally:
+        SUBSCRIBERS.discard(q)
+    return resp
+
 
 def log(msg):
     print(datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), msg, flush=True)
@@ -138,9 +169,11 @@ async def activity(request):
         b = ev.get("body") if isinstance(ev.get("body"), dict) else {}
         if kind == "Member search":                             # remember each customer's loan amount / on-hand / tenure
             await loop.run_in_executor(None, store.upsert_members, DB, b.get("results") or [], ev.get("at"))
+            notify_customers_changed()
         if ok and kind == "Credit report":
             cd = b.get("customer_details") or {}
             await loop.run_in_executor(None, store.add_lookup, DB, "search", ev, q.get("ic_number") or cd.get("ic_number"), cd.get("name"))
+            notify_customers_changed()
             crm.enqueue(DB, "activity.search", ev.get("at"), _source(ev), {
                 "customer": {"name": cd.get("name"), "ic": tracker.dash(q.get("ic_number") or cd.get("ic_number"))},
                 "blacklist_count": cd.get("blacklist_count"), "overdue_days": cd.get("active_overdue_days"),
@@ -148,6 +181,7 @@ async def activity(request):
         elif ok and q.get("ic"):
             rows = b.get("results") or []
             await loop.run_in_executor(None, store.add_lookup, DB, "lookup", ev, q.get("ic"), (rows[0].get("full_name") if len(rows) == 1 else ""))
+            notify_customers_changed()
     return web.json_response({"ok": True, "recorded": bool(ok)})
 
 
@@ -200,14 +234,21 @@ async def download(request):
 
 
 async def status(request):
+    if request.host.split(":")[0] not in ("127.0.0.1", "localhost"):   # public ngrok link -> straight to the customer viewer
+        raise web.HTTPFound("/view")
     return web.json_response({"service": "worker-tracker", "xlsx": XLSX, "exists": os.path.exists(XLSX)})
+
+
+PUBLIC_VIEW_PATHS = ("/", "/view", "/api/customers", "/api/stream")   # exposed over the public ngrok link, open, by request - no login
 
 
 @web.middleware
 async def guard(request, handler):
     """/activity (the extension's POST, key-protected) answers CORS / Private-Network-Access preflights.
-    Everything else - the viewer and the customer data - is for this computer only: no CORS headers, and
-    the Host must be localhost (blocks DNS-rebinding), so other websites can never read it."""
+    PUBLIC_VIEW_PATHS (the customer viewer) are reachable from any host - this is the only data opened
+    to the public ngrok link, and it has no login.
+    Everything else - the dashboard, settings, CRM config, Excel exports - is for this computer only: no
+    CORS headers, and the Host must be localhost (blocks DNS-rebinding), so other websites can never read it."""
     if request.path == "/activity":
         resp = web.Response(status=204) if request.method == "OPTIONS" else await handler(request)
         resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -215,6 +256,8 @@ async def guard(request, handler):
         resp.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
         resp.headers["Access-Control-Allow-Private-Network"] = "true"
         return resp
+    if request.path in PUBLIC_VIEW_PATHS:
+        return await handler(request)
     if request.host.split(":")[0] not in ("127.0.0.1", "localhost"):
         return web.json_response({"error": "forbidden"}, status=403)
     return await handler(request)
@@ -412,7 +455,7 @@ async def view(request):
 def main():
     app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[guard])
     app.on_startup.append(_background)
-    app.add_routes([web.post("/activity", activity), web.get("/tracker.xlsx", download), web.get("/api/customers", customers), web.get("/view", view), web.get("/dashboard", dashboard), web.get("/api/dashboard", dashboard_api), web.route("*", "/api/settings", settings_api),
+    app.add_routes([web.post("/activity", activity), web.get("/tracker.xlsx", download), web.get("/api/customers", customers), web.get("/api/stream", stream), web.get("/view", view), web.get("/dashboard", dashboard), web.get("/api/dashboard", dashboard_api), web.route("*", "/api/settings", settings_api),
                     web.route("*", "/api/notifications", notifications_api), web.route("*", "/api/crm", crm_api), web.get("/api/summary.xlsx", summary_xlsx), web.get("/", status)])
     web.run_app(app, host="127.0.0.1", port=CONFIG.get("port", 8780), print=lambda *_: None)
 

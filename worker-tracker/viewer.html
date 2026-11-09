@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Worker Tracker</title>
 <style>
   :root {
@@ -26,6 +26,8 @@
   .brand { font-weight: 800; font-size: 17px; letter-spacing: -0.02em; }
   .brand span { color: var(--accent); }
   .searchbox { display: flex; gap: 8px; flex: 1; min-width: 260px; max-width: 560px; }
+  .tb-filters, .tb-actions, .tb-links { display: contents; }   /* desktop: wrappers vanish, children stay direct flex items (unchanged layout) */
+  .date-filter { display: flex; gap: 6px; align-items: center; font-size: 13px; color: var(--muted); }
   .searchbox input { flex: 1; background: var(--bg); color: var(--text); border: 1px solid var(--border);
     border-radius: 10px; padding: 11px 14px; font-size: 16px; font-variant-numeric: tabular-nums; }
   .searchbox input:focus { outline: 2px solid var(--accent); border-color: transparent; }
@@ -87,7 +89,43 @@
   .cust b { display: block; font-size: 14px; } .cust span { color: var(--muted); font-size: 12.5px; }
   .cust .tags { margin-top: 4px; display: flex; gap: 6px; flex-wrap: wrap; }
   .layout .wrap { padding: 0; max-width: none; }
-  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } .side { position: static; max-height: 42vh; } }
+  #back { display: none; }
+
+  /* ---- mobile: single-pane master/detail, stacked topbar, bigger touch targets ---- */
+  @media (max-width: 860px) {
+    body { font-size: 16px; }
+    .topbar { flex-direction: column; align-items: stretch; gap: 10px; padding: 12px 16px;
+      padding-top: calc(12px + env(safe-area-inset-top, 0px)); }
+    .searchbox { max-width: none; min-width: 0; width: 100%; }
+    .searchbox input { padding: 12px 14px; }
+    .tb-filters { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: 100%; }
+    .tb-filters .date-filter { flex-wrap: wrap; }
+    .tb-actions { display: flex; align-items: center; justify-content: space-between; width: 100%; }
+    .tb-actions #theme { margin-left: 0 !important; }
+    .tb-links { display: flex; gap: 16px; }
+    button, .searchbox input, .dt { min-height: 44px; }
+    #dToday, #dClear { min-height: 36px; }
+
+    .layout { grid-template-columns: 1fr; gap: 0; max-width: none; padding: 0; }
+    /* normal document flow (not fixed/absolute) - the page scrolls as a whole, topbar stays pinned via its
+       own position:sticky. Only one pane renders at a time, toggled by body.show-report. */
+    .side { position: static; border: 0; border-radius: 0; max-height: none; overflow: visible; }
+    .layout .wrap { padding: 16px 16px calc(24px + env(safe-area-inset-bottom, 0px)); background: var(--bg); }
+    body:not(.show-report) .layout .wrap { display: none; }
+    body.show-report .side { display: none; }
+    #back { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 14px; padding: 10px 16px; }
+    .cust { padding: 14px 16px; }
+    .rp-cards { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .rp-name { font-size: 22px; }
+    table { font-size: 13px; }
+    th, td { padding: 10px 12px; }
+  }
+  @media (max-width: 420px) {
+    .rp-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .rp-card { padding: 12px 14px; }
+    .rp-card .v { font-size: 24px; }
+    .wrap, .layout { padding-left: 12px; padding-right: 12px; }
+  }
   .tracker-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 10px 16px; margin: 0 0 14px; font-size: 13.5px; color: var(--muted); display: flex; gap: 8px 24px; flex-wrap: wrap; }
   .tracker-bar b { color: var(--text); }
 </style>
@@ -99,14 +137,19 @@
   <div class="topbar">
     <div class="brand">KR883 · <span>Worker Tracker</span></div>
     <div class="searchbox"><input id="ic" type="text" placeholder="Filter by name or IC" autofocus></div>
-    <span style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted)" title="Show customers last searched on these dates">Searched <input id="dFrom" type="date" class="dt"> to <input id="dTo" type="date" class="dt"> <button class="ghost" id="dToday" style="padding:6px 10px;font-size:12px">Today</button> <button class="ghost" id="dClear" style="padding:6px 10px;font-size:12px">All</button></span>
-    <span id="count" style="color:var(--muted);font-size:13px"></span>
-    <button id="theme" class="ghost theme-btn" type="button" style="margin-left:auto" title="Switch light / dark theme">Theme</button>
-    <a href="dashboard" style="font-size:13px">Worker dashboard</a> <a href="tracker.xlsx" style="font-size:13px">Download Excel</a>
+    <div class="tb-filters">
+      <span class="date-filter" title="Show customers last searched on these dates">Searched <input id="dFrom" type="date" class="dt"> to <input id="dTo" type="date" class="dt"> <button class="ghost" id="dToday" style="padding:6px 10px;font-size:12px">Today</button> <button class="ghost" id="dClear" style="padding:6px 10px;font-size:12px">All</button></span>
+      <span id="count" style="color:var(--muted);font-size:13px"></span>
+    </div>
+    <div class="tb-actions">
+      <button id="theme" class="ghost theme-btn" type="button" style="margin-left:auto" title="Switch light / dark theme">Theme</button>
+      <span class="tb-links"><a href="dashboard" style="font-size:13px">Worker dashboard</a> <a href="tracker.xlsx" style="font-size:13px">Download Excel</a></span>
+    </div>
   </div>
   <div class="layout">
     <div class="side" id="side"></div>
     <div class="wrap">
+      <button id="back" class="ghost" type="button" hidden>&larr; All customers</button>
       <div class="msg" id="msg"></div>
       <div class="empty" id="empty"><div class="big">&#128450;</div>Pick a customer on the left to see the stored credit report.</div>
       <div id="report" hidden></div>
@@ -238,7 +281,7 @@ function renderReport(r) {
 }
 
 
-let DATA = [], CUR = null;
+let DATA = [], CUR = null, curUpdated = null;
 function drawList() {
   const q = $("#ic").value.toLowerCase().trim(), qd = q.replace(/\D/g, "");
   const from = $("#dFrom").value, to = $("#dTo").value;
@@ -256,6 +299,7 @@ function drawList() {
 function pick(ic) {
   CUR = ic; drawList();
   const c = DATA.find(x => x.ic === ic); if (!c) return;
+  curUpdated = c.tracker.updated;
   hideMsg(); renderReport(c);
   if (c.incomplete) showMsg("err", "The stored report for this customer was cut off (it was too large for the old Excel cell). Search this customer in KR883 again and the full report will be saved.");
   const t = c.tracker;
@@ -266,11 +310,26 @@ function pick(ic) {
   const sub = document.querySelector(".rp-sub");
   if (sub) sub.textContent = "Stored copy of the KR883 credit report - the latest one returned when this customer was last searched.";
   history.replaceState(null, "", "#" + ic);
+  document.body.classList.add("show-report");           // mobile: swap from the list pane to the report pane
+  $("#back").hidden = false;
+  window.scrollTo(0, 0);
 }
+function closeReport() {
+  CUR = null; curUpdated = null;
+  document.body.classList.remove("show-report");         // mobile: swap back to the list pane
+  $("#back").hidden = true;
+  history.replaceState(null, "", location.pathname + location.search);
+  drawList();
+}
+$("#back").onclick = closeReport;
 async function load(first) {
   try { DATA = await (await fetch("api/customers")).json(); } catch (e) { showMsg("err", "Cannot reach the tracker server."); return; }
   drawList();
-  if (first && CUR && DATA.some(c => c.ic === CUR)) pick(CUR);
+  if (first && CUR && DATA.some(c => c.ic === CUR)) { pick(CUR); return; }
+  if (CUR) {                                 // live update: re-render the open report only if it actually changed
+    const c = DATA.find(x => x.ic === CUR);
+    if (c && c.tracker.updated !== curUpdated) pick(CUR);
+  }
 }
 $("#side").onclick = e => { const el = e.target.closest(".cust"); if (el) pick(el.dataset.ic); };
 $("#ic").oninput = drawList;
@@ -291,7 +350,16 @@ $("#theme").onclick = () => {
 };
 paintThemeBtn();
 CUR = decodeURIComponent(location.hash.slice(1)) || null;
-load(true); setInterval(load, 20000);
+load(true);
+(function () {                              // instant push: reload the moment a search lands, no waiting on a poll
+  function connect() {
+    const es = new EventSource("api/stream");
+    es.onmessage = () => load();
+    es.onerror = () => { es.close(); setTimeout(connect, 2000); };   // auto-reconnect if the server restarts
+  }
+  connect();
+})();
+setInterval(load, 30000);                   // fallback in case a push is ever missed
 </script>
 </body>
 </html>
