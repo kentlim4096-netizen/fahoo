@@ -1,13 +1,25 @@
 # Starts the worker tracker server (server.py on 127.0.0.1:8780) if it isn't already running.
 # Safe to run repeatedly - idempotent. Used by the "WorkerTrackerServer" scheduled task
-# (logon + every 5 min) via start-tracker-hidden.vbs, so a crash or reboot self-heals.
+# (logon + network-connect + every 5 min) via start-tracker-hidden.vbs, so a crash or reboot self-heals.
+#
+# Uses a raw TCP probe instead of Test-NetConnection, which does extra route/diagnostic work and can
+# take 1-5+ seconds per call - most of the "slow to come up after a restart" feeling was this cmdlet,
+# not actually waiting on the server or the network.
 $ErrorActionPreference = "SilentlyContinue"
 $here = $PSScriptRoot
 Set-Location $here
 
-$up = $false
-try { $up = Test-NetConnection -ComputerName 127.0.0.1 -Port 8780 -InformationLevel Quiet -WarningAction SilentlyContinue } catch {}
-if ($up) { exit }
+function Test-PortOpen($port, $timeoutMs = 250) {
+    try {
+        $client = New-Object System.Net.Sockets.TcpClient
+        $task = $client.ConnectAsync("127.0.0.1", $port)
+        $ok = $task.Wait($timeoutMs) -and $client.Connected
+        $client.Close()
+        return $ok
+    } catch { return $false }
+}
+
+if (Test-PortOpen 8780) { exit }
 
 if (-not (Test-Path "$here\data")) { New-Item -ItemType Directory "$here\data" | Out-Null }
 

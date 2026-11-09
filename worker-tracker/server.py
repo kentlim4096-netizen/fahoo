@@ -239,7 +239,7 @@ async def status(request):
     return web.json_response({"service": "worker-tracker", "xlsx": XLSX, "exists": os.path.exists(XLSX)})
 
 
-PUBLIC_VIEW_PATHS = ("/", "/view", "/api/customers", "/api/stream")   # exposed over the public ngrok link, open, by request - no login
+PUBLIC_VIEW_PATHS = ("/", "/view", "/api/customers", "/api/customer", "/api/stream")   # exposed over the public ngrok link, open, by request - no login
 
 
 @web.middleware
@@ -308,14 +308,19 @@ def _shape(c):
     loans = d.get("loan_details") or []
     if not cd.get("admins"):
         cd["admins"] = sorted({l["admin"] for l in loans if l.get("admin")})
+    cd.setdefault("blacklist_count", c.get("blacklistCount", 0))     # cheap Excel columns - available even
+    cd.setdefault("active_overdue_days", c.get("overdueDays", 0))    # for the lightweight list (no full report)
     return {"found": bool(d), "ic": c["ic"], "name": cd.get("name") or c["name"], "phone": c["phone"], "customer": cd,
             "loans": loans, "transactions": d.get("transaction_log") or [], "blacklist": d.get("blacklist") or [],
             "member": {}, "signals": _signals(d) if d else {}, "memberRecord": c["member"], "incomplete": c.get("incomplete", False),
             "tracker": {"first": c["first"], "last": c["last"], "times": c["times"], "updated": c["updated"]}}
 
 
-def _read_customers():
-    """Customers sheet -> list of dicts for the viewer. Reads a copy of the file so Excel's lock never blocks."""
+def _read_customers(only_full_ic=None):
+    """Customers sheet -> list of dicts for the viewer. Reads a copy of the file so Excel's lock never blocks.
+    The full per-customer report/member JSON (which can be MBs across many customers - one real report per
+    customer, not a few KB) is only loaded for `only_full_ic` (a digits-only IC), never for the plain list -
+    the list view only needs the cheap summary columns, read instantly from the sheet's own cells."""
     import openpyxl
     if not os.path.exists(XLSX):
         return []
@@ -326,28 +331,49 @@ def _read_customers():
     for r in ws.iter_rows(min_row=2, values_only=True):
         if not r or not r[0]:
             continue
+        ic_digits = re.sub(r"\D", "", str(r[0]))
+        if only_full_ic is not None and ic_digits != only_full_ic:
+            continue                                            # fetching one customer's detail - skip the rest entirely
         def j(v):
             try:
                 return json.loads(v) if v else None
             except Exception:
                 return None
-        report = j(r[17])
-        full = os.path.join(os.path.dirname(XLSX), "reports", re.sub(r"\D", "", str(r[0])) + ".json")
-        if os.path.exists(full):                               # the uncut copy wins over the (maybe cut) cell
-            try:
-                with open(full, encoding="utf-8") as f:
-                    report = json.load(f)
-            except Exception:
-                pass
+        report, member, incomplete = None, None, False
+        if only_full_ic is not None:
+            report = j(r[17])
+            full = os.path.join(os.path.dirname(XLSX), "reports", ic_digits + ".json")
+            if os.path.exists(full):                           # the uncut copy wins over the (maybe cut) cell
+                try:
+                    with open(full, encoding="utf-8") as f:
+                        report = json.load(f)
+                except Exception:
+                    pass
+            member = j(r[18])
+            incomplete = report is None
         out.append({"ic": r[0], "name": r[1] or "", "phone": r[2] or "", "first": r[3] or "", "last": r[4] or "",
-                    "times": r[5] or 0, "updated": r[16] or "", "report": report, "member": j(r[18]), "incomplete": report is None})
+                    "times": r[5] or 0, "blacklistCount": r[7] or 0, "overdueDays": r[8] or 0,
+                    "updated": r[16] or "", "report": report, "member": member, "incomplete": incomplete})
     out.sort(key=lambda c: str(c["last"]), reverse=True)
     return out
 
 
 async def customers(request):
+    """Lightweight list - every customer's name/IC/summary, no per-customer report payload. Used for the
+    side list and to detect (via "updated") when the currently open customer's report should be refetched."""
     rows = await asyncio.get_running_loop().run_in_executor(None, _read_customers)
     return web.json_response([_shape(c) for c in rows])
+
+
+async def customer_detail(request):
+    """One customer's full stored credit report, fetched only when actually opened in the viewer."""
+    ic = re.sub(r"\D", "", request.query.get("ic") or "")
+    if not ic:
+        return web.json_response({"error": "ic required"}, status=400)
+    rows = await asyncio.get_running_loop().run_in_executor(None, _read_customers, ic)
+    if not rows:
+        return web.json_response({"error": "not found"}, status=404)
+    return web.json_response(_shape(rows[0]))
 
 
 def _today():
@@ -455,7 +481,7 @@ async def view(request):
 def main():
     app = web.Application(client_max_size=64 * 1024 * 1024, middlewares=[guard])
     app.on_startup.append(_background)
-    app.add_routes([web.post("/activity", activity), web.get("/tracker.xlsx", download), web.get("/api/customers", customers), web.get("/api/stream", stream), web.get("/view", view), web.get("/dashboard", dashboard), web.get("/api/dashboard", dashboard_api), web.route("*", "/api/settings", settings_api),
+    app.add_routes([web.post("/activity", activity), web.get("/tracker.xlsx", download), web.get("/api/customers", customers), web.get("/api/customer", customer_detail), web.get("/api/stream", stream), web.get("/view", view), web.get("/dashboard", dashboard), web.get("/api/dashboard", dashboard_api), web.route("*", "/api/settings", settings_api),
                     web.route("*", "/api/notifications", notifications_api), web.route("*", "/api/crm", crm_api), web.get("/api/summary.xlsx", summary_xlsx), web.get("/", status)])
     web.run_app(app, host="127.0.0.1", port=CONFIG.get("port", 8780), print=lambda *_: None)
 

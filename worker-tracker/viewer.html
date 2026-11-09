@@ -296,11 +296,22 @@ function drawList() {
       " · searched " + esc(c.tracker.times) + "× · " + esc(c.tracker.last) + "</span>" + (tags ? "<div class='tags'>" + tags + "</div>" : "") + "</div>";
   }).join("") || "<div class='rp-empty'>" + (DATA.length ? "No match." : "Nothing recorded yet. Search a customer in KR883.") + "</div>";
 }
-function pick(ic) {
+async function pick(ic) {
   CUR = ic; drawList();
-  const c = DATA.find(x => x.ic === ic); if (!c) return;
+  if (!DATA.some(x => x.ic === ic)) return;
+  document.body.classList.add("show-report");           // mobile: swap from the list pane to the report pane
+  $("#back").hidden = false;
+  window.scrollTo(0, 0);
+  hideMsg(); $("#empty").hidden = true;
+  $("#report").hidden = false;
+  $("#report").innerHTML = "<div class='rp-empty'>Loading…</div>";
+  let c;
+  try { c = await (await fetch("api/customer?ic=" + encodeURIComponent(ic))).json(); }
+  catch (e) { showMsg("err", "Cannot reach the tracker server."); return; }
+  if (CUR !== ic) return;                                // user picked someone else while this was loading
+  if (c.error) { showMsg("err", "Could not load this customer's report."); return; }
   curUpdated = c.tracker.updated;
-  hideMsg(); renderReport(c);
+  renderReport(c);
   if (c.incomplete) showMsg("err", "The stored report for this customer was cut off (it was too large for the old Excel cell). Search this customer in KR883 again and the full report will be saved.");
   const t = c.tracker;
   const bar = document.createElement("div"); bar.className = "tracker-bar";
@@ -310,9 +321,6 @@ function pick(ic) {
   const sub = document.querySelector(".rp-sub");
   if (sub) sub.textContent = "Stored copy of the KR883 credit report - the latest one returned when this customer was last searched.";
   history.replaceState(null, "", "#" + ic);
-  document.body.classList.add("show-report");           // mobile: swap from the list pane to the report pane
-  $("#back").hidden = false;
-  window.scrollTo(0, 0);
 }
 function closeReport() {
   CUR = null; curUpdated = null;
