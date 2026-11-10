@@ -18,6 +18,16 @@ import datetime, json, os, re, sqlite3, threading
 HB_SECONDS = 30                                   # one heartbeat = 30 s of active use
 _MYT = datetime.timedelta(hours=8)
 _LOCK = threading.Lock()
+
+
+def _safe_json(s):
+    """json.loads that never raises - an action's stored data can be truncated (it's capped at 8000
+    chars before storing, which can cut a JSON string mid-way), and one bad row must never take down
+    the whole dashboard."""
+    try:
+        return json.loads(s or "{}")
+    except Exception:
+        return {}
 _REPAY = re.compile(r"repay|payment|collect|settle|receipt", re.I)
 _DISB = re.compile(r"disburs", re.I)
 _OPEN = re.compile(r"(open|apply|applic|new)[-_ ]?loan|loan[-_/ ]?(open|apply|create|application)", re.I)
@@ -295,7 +305,7 @@ def _stats(dbpath, rows, rules):
                              "text": f"Credit report: {r['name'] or ''} ({_dash(r['ic'])})"})
         elif r["kind"] == "action":
             hours[t.hour]["actions"] += 1
-            data = json.loads(r["data"] or "{}")
+            data = _safe_json(r["data"])
             cls = classify(r["method"], r["path"], data.get("request"), rules)
             if cls == "ignore":
                 continue
@@ -405,7 +415,7 @@ def history(path, days=14, worker="", end=None, rules=None, computer=""):
                 o["searches"] += 1
                 o["customers"].add(r["ic"])
             elif r["kind"] == "action":
-                cls = classify(r["method"], r["path"], json.loads(r["data"] or "{}").get("request"), rules)
+                cls = classify(r["method"], r["path"], _safe_json(r["data"]).get("request"), rules)
                 if cls == "ignore":
                     continue
                 o["actions"] += 1
@@ -427,6 +437,6 @@ def action_keys(path, rules=None, limit=40):
             k = rule_key(r["method"], r["path"])
             if k not in seen:
                 seen[k] = {"key": k, "count": 0, "last": _myt(r["ts"]).strftime("%Y-%m-%d %H:%M"),
-                           "kind": classify(r["method"], r["path"], json.loads(r["data"] or "{}").get("request"), rules)}
+                           "kind": classify(r["method"], r["path"], _safe_json(r["data"]).get("request"), rules)}
             seen[k]["count"] += 1
     return sorted(seen.values(), key=lambda x: -x["count"])[:limit]

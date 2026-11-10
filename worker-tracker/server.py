@@ -240,15 +240,22 @@ async def status(request):
 
 
 PUBLIC_VIEW_PATHS = ("/", "/view", "/api/customers", "/api/customer", "/api/stream")   # exposed over the public ngrok link, open, by request - no login
+PUBLIC_READ_PATHS = ("/dashboard", "/api/dashboard", "/api/notifications", "/api/crm", "/api/summary.xlsx")
+# ^ dashboard VIEWING, GET only - opened by request, no login. POST to /api/settings, /api/crm, /api/notifications
+#   (changing alert settings, LG-CRM config, acking alerts) stays localhost-only even here, so a visitor with
+#   just the link can look but never change anything or redirect LG-CRM sync. /tracker.xlsx (the raw workbook
+#   with full ICs, DOB, phone and every stored credit report) is deliberately NOT here - /view already exposes
+#   what's meant to be public, in a filtered form; the raw export is more than that.
 
 
 @web.middleware
 async def guard(request, handler):
     """/activity (the extension's POST, key-protected) answers CORS / Private-Network-Access preflights.
-    PUBLIC_VIEW_PATHS (the customer viewer) are reachable from any host - this is the only data opened
-    to the public ngrok link, and it has no login.
-    Everything else - the dashboard, settings, CRM config, Excel exports - is for this computer only: no
-    CORS headers, and the Host must be localhost (blocks DNS-rebinding), so other websites can never read it."""
+    PUBLIC_VIEW_PATHS (the customer viewer) and PUBLIC_READ_PATHS-on-GET (dashboard viewing) are reachable
+    from any host - this is the only data opened to the public ngrok link, and it has no login.
+    Everything else - changing settings/CRM config, Excel exports of the raw workbook - is for this computer
+    only: no CORS headers, and the Host must be localhost (blocks DNS-rebinding), so other websites can
+    never read it."""
     if request.path == "/activity":
         resp = web.Response(status=204) if request.method == "OPTIONS" else await handler(request)
         resp.headers["Access-Control-Allow-Origin"] = "*"
@@ -257,6 +264,8 @@ async def guard(request, handler):
         resp.headers["Access-Control-Allow-Private-Network"] = "true"
         return resp
     if request.path in PUBLIC_VIEW_PATHS:
+        return await handler(request)
+    if request.path in PUBLIC_READ_PATHS and request.method == "GET":
         return await handler(request)
     if request.host.split(":")[0] not in ("127.0.0.1", "localhost"):
         return web.json_response({"error": "forbidden"}, status=403)
