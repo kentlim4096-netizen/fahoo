@@ -137,12 +137,44 @@ def amount_of(request):
     return _first(request, "amount", "repayment_amount", "paid_amount", "payment_amount", "credit", "total")
 
 
-def loan_info(path, ic, request, response, member_id=None):
-    """Customer + loan figures for an action: what the worker submitted, filled in from the Member List row
-    this computer last saw for that customer (loan amount / on-hand amount / tenure)."""
+_ID_IN_PATH = re.compile(r"/loans?/([^/]+)/", re.I)
+
+
+def _find_loan_terms(path, loan_id):
+    """The loan_amount / on_hand_amount / tenure_days actually submitted when THIS loan was created
+    (matched by loan id against the creation response's new_loan_id/id/loan_id). A disburse or repay
+    call references an existing loan by id and does not resend its terms, so without this, the only
+    fallback is the Member List cache - which can be stale (an older loan's numbers) if the list was
+    not re-opened after the new loan was created, wrongly attributing an old loan's amount/tenure."""
+    if not loan_id:
+        return {}
+    with _LOCK, _conn(path) as c:
+        rows = c.execute("SELECT data FROM events WHERE kind = 'action' AND method = 'POST' "
+                          "ORDER BY id DESC LIMIT 1000").fetchall()
+    for r in rows:
+        d = _safe_json(r["data"])
+        resp = d.get("response") if isinstance(d.get("response"), dict) else {}
+        rd = resp.get("data") if isinstance(resp.get("data"), dict) else {}
+        found_id = rd.get("new_loan_id") or rd.get("loan_id") or rd.get("id") or resp.get("loan_id") or resp.get("id")
+        if found_id is not None and str(found_id) == str(loan_id):
+            req = d.get("request") if isinstance(d.get("request"), dict) else {}
+            return {"amount": req.get("loan_amount"), "onHand": req.get("actual_receivable") or req.get("on_hand_amount"),
+                    "tenure": req.get("tenure_days")}
+    return {}
+
+
+def loan_info(path, ic, request, response, member_id=None, action_path=None):
+    """Customer + loan figures for an action: what the worker submitted for THIS action; failing that,
+    the terms submitted when this same loan was created (matched by id); failing that, the Member List
+    row this computer last saw for that customer (loan amount / on-hand amount / tenure) - the least
+    reliable source, since it can predate a brand new loan on the same customer."""
     req = request if isinstance(request, dict) else {}
     resp = response if isinstance(response, dict) else {}
     ic = _digits(ic) or find_ic(req, resp)
+    terms = {}
+    m = _ID_IN_PATH.search(action_path or "")
+    if m and m.group(1).lower() not in ("credit-report", "summary", "manual-apply"):
+        terms = _find_loan_terms(path, m.group(1))
     mid = member_id or _first(req, "member", "member_id", "member_uuid", "customer", "customer_id") or _first(resp, "member", "member_id")
     row = None
     with _LOCK, _conn(path) as c:
@@ -154,9 +186,9 @@ def loan_info(path, ic, request, response, member_id=None):
     return {
         "name": _first(req, "full_name", "name") or _first(resp, "full_name", "name") or row.get("name") or "",
         "ic": _dash(ic or row.get("ic")),
-        "amount": _first(req, "loan_amount", "amount", "principal") or _first(resp, "loan_amount") or row.get("loan_amount") or "",
-        "onHand": _first(req, "on_hand_amount", "on_hand", "onHand") or _first(resp, "on_hand_amount") or row.get("on_hand") or "",
-        "tenure": _first(req, "tenure_days", "tenure") or _first(resp, "tenure_days") or row.get("tenure") or "",
+        "amount": _first(req, "loan_amount", "amount", "principal") or _first(resp, "loan_amount") or terms.get("amount") or row.get("loan_amount") or "",
+        "onHand": _first(req, "on_hand_amount", "on_hand", "onHand") or _first(resp, "on_hand_amount") or terms.get("onHand") or row.get("on_hand") or "",
+        "tenure": _first(req, "tenure_days", "tenure") or _first(resp, "tenure_days") or terms.get("tenure") or row.get("tenure") or "",
     }
 
 
@@ -311,7 +343,7 @@ def _stats(dbpath, rows, rules):
                 continue
             if r["ic"]:
                 action_ics.add(r["ic"])
-            info = loan_info(dbpath, r["ic"], data.get("request"), data.get("response")) if cls in ("opened", "disbursed", "repayment") else {}
+            info = loan_info(dbpath, r["ic"], data.get("request"), data.get("response"), action_path=r["path"]) if cls in ("opened", "disbursed", "repayment") else {}
             amount = info.get("amount") if cls != "repayment" else amount_of(data.get("request"))
             item = {"time": t.strftime("%H:%M:%S"), "kind": cls, "worker": r["worker"], "ok": (r["status"] or 0) < 400,
                     "key": rule_key(r["method"], r["path"]), "text": f"{r['method']} {r['path']} -> {r['status']}",

@@ -127,7 +127,7 @@ def process_action(ev, cfg):
     """Store a save/update action and, if it is a loan being opened / disbursed and that alert is on, raise it."""
     rid = store.add(DB, ev)
     cls = store.classify(ev.get("method"), ev.get("path"), ev.get("request"), cfg["rules"])
-    info = store.loan_info(DB, store.find_ic(ev.get("request"), ev.get("path"), ev.get("response")), ev.get("request"), ev.get("response"))
+    info = store.loan_info(DB, store.find_ic(ev.get("request"), ev.get("path"), ev.get("response")), ev.get("request"), ev.get("response"), action_path=ev.get("path"))
     if rid:
         push_action_to_crm(ev, cls, info)
     if rid and cls in ("opened", "disbursed") and cfg["notify"].get(cls):
